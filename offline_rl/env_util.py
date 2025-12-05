@@ -4,9 +4,11 @@ import torch
 from torchrl.data import Composite
 from torchrl.envs.transforms import Transform
 from torchrl.envs.libs.gym import GymEnv
-from torchrl.envs import DTypeCastTransform
+from torchrl.envs import DTypeCastTransform, GymWrapper
 
+from env.ltl_wrappers import LTLEnv
 from env.visual_minecraft.env import GridWorldEnv
+from env.simple_ltl_env import SimpleLTLEnv
 
 def _get_args_kwargs_visual_minecraft():
     items = ["pickaxe", "lava", "door", "gem", "empty"]
@@ -58,3 +60,19 @@ def setup_visual_minecraft_with_wrapper():
     )
 
     return _env
+
+
+def setup_simple_ltl_env():
+    env_id = "SimpleLTLEnv-v0"
+    _env = gym.make(
+        env_id,
+    )
+    _env = LTLEnv(
+        _env,
+        progression_mode="full",
+        ltl_sampler="Sequence_2_4",
+        intrinsic=0.0,
+    )
+    torchrl_env = GymWrapper(_env)
+
+    return torchrl_env
