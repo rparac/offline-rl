@@ -6,9 +6,9 @@ from torchrl.envs.transforms import Transform
 from torchrl.envs.libs.gym import GymEnv
 from torchrl.envs import DTypeCastTransform, GymWrapper
 
-from env.ltl_wrappers import LTLEnv
 from env.visual_minecraft.env import GridWorldEnv
-from env.simple_ltl_env import SimpleLTLEnv
+# from env.ltl_wrappers import LTLEnv
+# from env.simple_ltl_env import SimpleLTLEnv
 
 def _get_args_kwargs_visual_minecraft():
     items = ["pickaxe", "lava", "door", "gem", "empty"]
@@ -47,13 +47,14 @@ def setup_visual_minecraft():
 #     #     return output_spec.replace(observation=output_spec["observation"].float())
 
 
-def setup_visual_minecraft_with_wrapper():
+def setup_visual_minecraft_with_wrapper(device: torch.device = torch.device("cpu")):
     env_id = "VisualMinecraft-v0"
     categorical_action_encoding = True
     _env = GymEnv(
         env_id,
         categorical_action_encoding=categorical_action_encoding,
-        **_get_args_kwargs_visual_minecraft()
+        **_get_args_kwargs_visual_minecraft(),
+        device=device,
     )
     _env = _env.append_transform(
         DTypeCastTransform(dtype_out=torch.float32, dtype_in=torch.int64, in_keys=["observation"])
