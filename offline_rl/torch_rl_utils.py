@@ -1,3 +1,5 @@
+import io
+from PIL import Image
 import matplotlib
 matplotlib.use('Agg')
 
@@ -44,10 +46,10 @@ def define_network(env, device):
     q_net_base = TensorDictModule(
         QNet(),
         in_keys=["observation"],
-        out_keys=["action_value"],
+        out_keys=["state_action_value"],
     )
     q_net = QValueModule(
-        action_value_key="action_value",
+        action_value_key="state_action_value",
         action_space="categorical",
     )
 
@@ -87,6 +89,7 @@ def define_loss_module_q_learning(model, gamma=0.99):
         loss_function="l2",
         action_space="categorical",
     )
+    loss_module.set_keys(action_value="state_action_value")
     loss_module.make_value_estimator(gamma=gamma)
     return loss_module
 
@@ -111,7 +114,14 @@ def setup_data():
     replay_buffer.load(dataset_path)
     return replay_buffer
 
-def _plot_q_table(q_table: np.ndarray, save_path: str = "q_table_visualization.png"):
+def _pyplt_to_pil(plt):
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png')
+    buf.seek(0)
+    img = Image.open(buf)
+    return img
+
+def _generate_q_table(q_table: np.ndarray) -> Image.Image:
     """
     Core plotting logic for visualizing a Q-table.
     Uses the 'gold standard' visualization originally defined in `offline_rl/q_learning.py`.
@@ -165,15 +175,13 @@ def _plot_q_table(q_table: np.ndarray, save_path: str = "q_table_visualization.p
 
     plt.suptitle('Q-Table for Each Action', fontsize=16, weight='bold', y=0.995)
     plt.tight_layout()
-    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
-    print(f"\nQ-table visualization saved to: {save_path}")
+    img = _pyplt_to_pil(plt)
     plt.close()
+    return img
 
 
 @torch.no_grad()
-def visualize_q_table(source, grid_size: int = 4, num_actions: int = 4,
-                      save_path: str = "offline_rl/imgs/new_q_table_visualization.png"):
+def generate_q_table(source, grid_size: int = 4, num_actions: int = 4) -> Image.Image:
     """
     Unified Q-table visualization.
 
@@ -184,8 +192,7 @@ def visualize_q_table(source, grid_size: int = 4, num_actions: int = 4,
     """
     # Case 1: already a Q-table (numpy array)
     if isinstance(source, np.ndarray):
-        _plot_q_table(source, save_path=save_path)
-        return
+        return _generate_q_table(source)
 
     q_net = source
 
@@ -214,17 +221,17 @@ def visualize_q_table(source, grid_size: int = 4, num_actions: int = 4,
 
     q_net(td)
     # TODO: should this be state_action_value?
-    q_values = td["action_value"].squeeze(-1).cpu()  # [num_states]
+    q_values = td["state_action_value"].squeeze(-1).cpu()  # [num_states]
 
     # Reshape into (grid_size, grid_size, num_actions) Q-table
     q_table = np.zeros((grid_size, grid_size, num_actions), dtype=np.float32)
     for idx, (row, col) in enumerate(states):
         q_table[row, col, :] = q_values[idx].cpu().numpy()
 
-    _plot_q_table(q_table, save_path=save_path)
+    return _generate_q_table(q_table)
 
 
-def _plot_v_table(v_table: np.ndarray, save_path: str = "offline_rl/imgs/v_table_visualization.png"):
+def _generate_v_table(v_table: np.ndarray) -> Image.Image:
     """
     Plot a state-value table V(s) as a single heatmap, styled similarly to the Q-table plots.
     """
@@ -255,15 +262,13 @@ def _plot_v_table(v_table: np.ndarray, save_path: str = "offline_rl/imgs/v_table
                     color=text_color, fontsize=10, weight="bold")
 
     plt.tight_layout()
-    Path(save_path).parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, dpi=150, bbox_inches="tight")
-    print(f"\nV-table visualization saved to: {save_path}")
+    img = _pyplt_to_pil(plt)
     plt.close()
+    return img
 
 
 @torch.no_grad()
-def visualize_v_table(source, grid_size: int = 4,
-                      save_path: str = "offline_rl/imgs/v_table_visualization.png"):
+def generate_v_table(source, grid_size: int = 4) -> Image.Image:
     """
     Visualize a state-value function V(s) over a discrete grid world.
 
@@ -274,8 +279,7 @@ def visualize_v_table(source, grid_size: int = 4,
     """
     # Case 1: already a V-table (numpy array)
     if isinstance(source, np.ndarray):
-        _plot_v_table(source, save_path=save_path)
-        return
+        return _generate_v_table(source)
 
     v_net = source
 
@@ -303,4 +307,4 @@ def visualize_v_table(source, grid_size: int = 4,
     for idx, (row, col) in enumerate(states):
         v_table[row, col] = v_values[idx].item()
 
-    _plot_v_table(v_table, save_path=save_path)
+    return _generate_v_table(v_table)

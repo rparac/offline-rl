@@ -12,7 +12,7 @@ import torch
 import wandb
 import time
 
-from offline_rl.torch_rl_utils import define_loss_module_q_learning, define_network, define_loss_module, evaluate_policy, setup_data, setup_visual_minecraft_with_wrapper, visualize_q_table, visualize_v_table
+from offline_rl.torch_rl_utils import define_loss_module_q_learning, define_network, define_loss_module, evaluate_policy, setup_data, setup_visual_minecraft_with_wrapper, generate_q_table, generate_v_table
 
 
 device = "cuda"
@@ -28,6 +28,7 @@ q_actor = QValueActor(
     module=model[1], 
     in_keys=["observation"],
     action_space="categorical",
+    action_value_key="state_action_value",
 )
 egreedy_module = EGreedyModule(
     spec=action_spec,
@@ -155,13 +156,12 @@ for i, data in enumerate(tqdm(collector, total=num_batched_iterations)):
         with torch.no_grad(), set_exploration_type(ExplorationType.DETERMINISTIC):
             # Visualize Q-table at the end of training
             print("Generating Q-table visualization...")
-            viz_path = f"offline_rl/imgs/deep_q_table_visualization_{i}.png"
-            visualize_q_table(model[1], grid_size=4, num_actions=4, save_path=viz_path)
+            q_table_img = generate_q_table(model[1], grid_size=4, num_actions=4)
             
             # Log Q-table visualization to wandb
-            if Path(viz_path).exists():
+            if q_table_img is not None:
                 wandb.log({
-                    "q_table_visualization": wandb.Image(viz_path),
+                    "q_table_visualization": wandb.Image(q_table_img),
                 }, step=i)
             
             # Evaluate policy if evaluate_policy function is available

@@ -6,7 +6,7 @@ import numpy as np
 import gymnasium as gym
 
 from offline_rl.env_util import setup_visual_minecraft
-from offline_rl.torch_rl_utils import visualize_q_table
+from offline_rl.torch_rl_utils import generate_q_table
 
 
 def epsilon_greedy_action(q_table, state, epsilon, action_space):
@@ -112,7 +112,7 @@ if __name__ == "__main__":
     
     # Visualize Q-table
     print("\nCreating Q-table visualization...")
-    visualize_q_table(q_table, save_path="artifacts/q_table_visualization.png")
+    generate_q_table(q_table, save_path="artifacts/q_table_visualization.png")
 
 
     save_dir = os.path.join(os.path.dirname(__file__), "offline_rl")
