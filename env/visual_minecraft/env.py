@@ -65,9 +65,6 @@ class GridWorldEnv(gym.Env):
                                       dictionary_symbols=self.dictionary_symbols,
                                       reward="sparse")
 
-        self.max_reward = 100
-        print("MAXIMUM REWARD:", self.max_reward)
-
         self.set_for_dict = set(self.automaton.rewards)
         self.list_rew = sorted(self.set_for_dict)
         self.rew_dictionary = {}

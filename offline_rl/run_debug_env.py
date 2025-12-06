@@ -136,10 +136,13 @@ def main() -> None:
                     obs = obs.squeeze(0)
             
             step_idx += 1
-            print_step_result(step_idx, action_name, reward, terminated, truncated, info)
-            
+
             # Save render after each step
             save_render_image(env, output_dir, step_idx, episode)
+
+            print_step_result(step_idx, action_name, reward, terminated, truncated, info)
+            print(obs)
+            
 
     finally:
         env.close()
