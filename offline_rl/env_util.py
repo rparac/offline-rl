@@ -4,7 +4,7 @@ import torch
 from torchrl.data import Composite
 from torchrl.envs.transforms import Transform
 from torchrl.envs.libs.gym import GymEnv
-from torchrl.envs import DTypeCastTransform, GymWrapper
+from torchrl.envs import DTypeCastTransform, GymWrapper, RewardSum, StepCounter
 
 from env.visual_minecraft.env import GridWorldEnv
 # from env.ltl_wrappers import LTLEnv
@@ -58,6 +58,13 @@ def setup_visual_minecraft_with_wrapper(device: torch.device = torch.device("cpu
     )
     _env = _env.append_transform(
         DTypeCastTransform(dtype_out=torch.float32, dtype_in=torch.int64, in_keys=["observation"])
+    )
+    # Used for logging purposes
+    _env = _env.append_transform(
+        RewardSum()
+    )
+    _env = _env.append_transform(
+        StepCounter()
     )
 
     return _env

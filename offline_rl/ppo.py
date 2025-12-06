@@ -26,24 +26,25 @@ from torchrl.envs import ParallelEnv
 from torchrl.modules import ProbabilisticActor
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
+from torchrl.record.loggers.wandb import WandbLogger
 from tqdm import tqdm
-import wandb
 
-def record_policy_video(policy, max_steps=10, seed=42):
+def record_policy_video(policy, max_steps=10, seed=42, device=None):
     """
-    Record a policy rollout as a video and return frames for wandb logging.
+    Record a policy rollout as a video and return frames for logging.
     
     Args:
         policy: The policy to evaluate
         max_steps: Maximum number of steps in the rollout
         seed: Random seed for reproducibility
+        device: Device to run policy on
         
     Returns:
-        frames: Numpy array of shape (T, H, W, C) representing video frames
+        frames: Tensor of shape (T, C, H, W) representing video frames
     """
     
     # Create a separate environment for rendering with rgb_array mode
-    render_env = setup_visual_minecraft_with_wrapper(device=torch.device("cpu"))
+    render_env = setup_visual_minecraft_with_wrapper(device=device)
 
     td = render_env.reset()
 
@@ -71,13 +72,11 @@ def record_policy_video(policy, max_steps=10, seed=42):
     
     render_env.close()
 
-    # Convert frames to numpy array format expected by wandb
+    # Convert frames to tensor format expected by TorchRL logger
+    # Shape: (T, H, W, C) -> (T, C, H, W)
     frames_array = np.stack(imgs)  # Shape: (T, H, W, C)
-    # wandb.Video expects shape (T, H, W, C) where T is time, H/W are height/width, C is channels
-    frames_array = frames_array.transpose(0, 3, 1, 2)
-
-    video = wandb.Video(frames_array, fps=4, format="mp4")
-    return video
+    frames_array = frames_array.transpose(0, 3, 1, 2)  # Shape: (T, C, H, W)
+    return frames_array
 
 
 if __name__ == "__main__":
@@ -93,8 +92,8 @@ if __name__ == "__main__":
     lr = 3e-4
     max_grad_norm = 1.0
 
-    # frames_per_batch = 8192
-    frames_per_batch = 128
+    frames_per_batch = 8192
+    # frames_per_batch = 128
     # For a complete training, bring the number of frames up to 1M
     # total_frames = 50_000
     total_frames = 5_000_000
@@ -156,8 +155,6 @@ if __name__ == "__main__":
         policy=policy,
         frames_per_batch=frames_per_batch,
         total_frames=total_frames,
-        split_trajs=True, # split trajectories into an episode view
-        reset_at_each_batch=True, # do not make episode collection stateful;  this would make metrics tracking more difficult
         device=device,
         num_workers=num_workers,
     )
@@ -197,28 +194,30 @@ if __name__ == "__main__":
 
 
 
-    # wandb_video = record_policy_video(policy, max_steps=100, seed=42)
-    # print("Done")
-
-    # Initialize wandb
-    wandb.init(
+    # Initialize TorchRL WandbLogger
+    logger = WandbLogger(
+        exp_name="ppo-training",
         project="offline-rl-ppo",
-        config={
-            "lr": lr,
-            "max_grad_norm": max_grad_norm,
-            "frames_per_batch": frames_per_batch,
-            "total_frames": total_frames,
-            "sub_batch_size": sub_batch_size,
-            "num_epochs": num_epochs,
-            "clip_epsilon": clip_epsilon,
-            "gamma": gamma,
-            "lmbda": lmbda,
-            "entropy_eps": entropy_eps,
-            "device": str(device),
-            "num_workers": num_workers,
-            "num_envs_per_worker": num_envs_per_worker,
-        }
+        save_dir="./logs",
+        offline=False,
     )
+    
+    # Log hyperparameters
+    logger.log_hparams({
+        "lr": lr,
+        "max_grad_norm": max_grad_norm,
+        "frames_per_batch": frames_per_batch,
+        "total_frames": total_frames,
+        "sub_batch_size": sub_batch_size,
+        "num_epochs": num_epochs,
+        "clip_epsilon": clip_epsilon,
+        "gamma": gamma,
+        "lmbda": lmbda,
+        "entropy_eps": entropy_eps,
+        "device": str(device),
+        "num_workers": num_workers,
+        "num_envs_per_worker": num_envs_per_worker,
+    })
 
     num_steps_lifetime = 0
     num_terminated_lifetime = 0
@@ -229,14 +228,18 @@ if __name__ == "__main__":
     for i, tensordict_data in tqdm(enumerate(collector)):
         # Count number of agent steps sampled
         num_steps = frames_per_batch
+        num_steps_lifetime += num_steps
+
+        done_mask = tensordict_data["next", "done"]
+
+        mean_episode_reward_batch = tensordict_data["next", "episode_reward"][done_mask].mean().item()
+        mean_episode_steps_batch = tensordict_data["next", "step_count"][done_mask].float().mean().item()
+
+        num_truncated_batch = tensordict_data["next", "truncated"].sum().item()
+        num_terminated_batch = tensordict_data["next", "terminated"].sum().item()
         
-        # Count number of episodes sampled (episodes that ended)
-        num_terminated = tensordict_data["next", "terminated"].sum().item()
-        num_truncated = tensordict_data["next", "truncated"].sum().item()
 
         num_steps_lifetime += num_steps
-        num_terminated_lifetime += num_terminated
-        num_truncated_lifetime += num_truncated
         
         # we now have a batch of data to work with. Let's learn something from it.
         for _ in range(num_epochs):
@@ -264,34 +267,26 @@ if __name__ == "__main__":
                 optim.step()
                 optim.zero_grad()
                 
-                # Log loss components to wandb
-                wandb.log({
-                    "train/loss_objective": loss_vals["loss_objective"].item(),
-                    "train/loss_critic": loss_vals["loss_critic"].item(),
-                    "train/loss_entropy": loss_vals["loss_entropy"].item(),
-                    "train/loss_total": loss_value.item(),
-                })
+                # Log loss components
+                logger.log_scalar("train/loss_objective", loss_vals["loss_objective"].item(), step=i)
+                logger.log_scalar("train/loss_critic", loss_vals["loss_critic"].item(), step=i)
+                logger.log_scalar("train/loss_entropy", loss_vals["loss_entropy"].item(), step=i)
+                logger.log_scalar("train/loss_total", loss_value.item(), step=i)
 
-        logs["reward"].append(tensordict_data["next", "reward"].mean().item())
+        logs["episode_reward"].append(mean_episode_reward_batch)
         # pbar.update(tensordict_data.numel())
-        cum_reward_str = (
-            f"average reward={logs['reward'][-1]: 4.4f} (init={logs['reward'][0]: 4.4f})"
-        )
+        logs["episode_steps"].append(mean_episode_steps_batch)
         logs["lr"].append(optim.param_groups[0]["lr"])
-        lr_str = f"lr policy: {logs['lr'][-1]: 4.4f}"
         
-        # Log training metrics to wandb
-        wandb.log({
-            "train/reward": logs["reward"][-1],
-            "train/learning_rate": logs["lr"][-1],
-            "train/batch": i,
-            "train/num_steps_sampled_batch": num_steps,
-            "train/num_steps_sampled_lifetime": num_steps_lifetime,
-            "train/num_terminated_sampled_batch": num_terminated,
-            "train/num_terminated_sampled_lifetime": num_terminated_lifetime,
-            "train/num_truncated_sampled_batch": num_truncated,
-            "train/num_truncated_sampled_lifetime": num_truncated_lifetime,
-        })
+        # Log training metrics
+        logger.log_scalar("train/episode_reward_mean", logs["episode_reward"][-1], step=i)
+        logger.log_scalar("train/learning_rate", logs["lr"][-1], step=i)
+        logger.log_scalar("train/episode_steps_mean", logs["episode_steps"][-1], step=i)
+        logger.log_scalar("train/batch", i, step=i)
+        logger.log_scalar("train/num_steps_sampled_batch", frames_per_batch, step=i)
+        logger.log_scalar("train/num_steps_sampled_lifetime", num_steps_lifetime, step=i)
+        logger.log_scalar("train/num_terminated_sampled_batch", num_terminated_batch, step=i)
+        logger.log_scalar("train/num_truncated_sampled_batch", num_truncated_batch, step=i)
         if i % 10 == 0:
             # We evaluate the policy once every 10 batches of data.
             # Evaluation is rather simple: execute the policy without exploration
@@ -302,42 +297,24 @@ if __name__ == "__main__":
             with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
                 # execute a rollout with the trained policy
                 eval_rollout = env.rollout(1000, policy)
-                logs["eval reward"].append(eval_rollout["next", "reward"].mean().item())
-                logs["eval reward (sum)"].append(
-                    eval_rollout["next", "reward"].sum().item()
-                )
-                eval_str = (
-                    f"eval cumulative reward: {logs['eval reward (sum)'][-1]: 4.4f} "
-                    f"(init: {logs['eval reward (sum)'][0]: 4.4f})"
-                )
+                done_mask = eval_rollout["next", "done"]
+                eval_reward_mean = eval_rollout["next", "episode_reward"][done_mask].mean().item()
+                logs["eval episode reward"].append(eval_reward_mean)
                 
                 # Record policy video for visualization
                 try:
-                    video = record_policy_video(policy, max_steps=10, seed=42)
-                    # Log video to wandb
-                    # wandb.Video expects shape (T, H, W, C) or (T, C, H, W)
-                    # Our frames are already in (T, H, W, C) format
-                    wandb.log({
-                        "eval/reward_mean": logs["eval reward"][-1],
-                        "eval/reward_sum": logs["eval reward (sum)"][-1],
-                        "eval/batch": i,
-                        "eval/policy_video": video,
-                    })
+                    video_frames = record_policy_video(policy, max_steps=10, seed=42, device=device)
+                    logger.log_video("eval/policy_video", video_frames, step=i, fps=4)
                 except Exception as e:
                     # If video recording fails, still log other metrics
                     print(f"Warning: Failed to record policy video: {e}")
-                    wandb.log({
-                        "eval/reward_mean": logs["eval reward"][-1],
-                        "eval/reward_sum": logs["eval reward (sum)"][-1],
-                        "eval/batch": i,
-                    })
+                
+                # Log evaluation metrics
+                logger.log_scalar("eval/episode_reward_mean", logs["eval episode reward"][-1], step=i)
+                logger.log_scalar("eval/batch", i, step=i)
                 
                 del eval_rollout
-        # pbar.set_description(", ".join([eval_str, cum_reward_str, lr_str]))
 
         # We're also using a learning rate scheduler. Like the gradient clipping,
         # this is a nice-to-have but nothing necessary for PPO to work.
         scheduler.step()
-
-    # Finish wandb run
-    wandb.finish()
