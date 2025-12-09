@@ -23,7 +23,8 @@ from gymnasium.spaces import Box
 from env.visual_minecraft.finite_state_machine import MooreMachine
 
 
-resize = torchvision.transforms.Resize((64, 64))
+# resize = torchvision.transforms.Resize((64, 64))
+resize = torchvision.transforms.Resize((224, 224))
 normalize = torchvision.transforms.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5))
 transforms = torchvision.transforms.Compose([
     torchvision.transforms.ToTensor(),
