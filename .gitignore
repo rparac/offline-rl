@@ -152,3 +152,9 @@ lapo/expert_data
 
 # dataset
 torch_dataset/
+
+# Do not add model cache
+cache/
+
+# Do not add debug images
+debug_env_images/
