@@ -199,6 +199,7 @@ class CLIPRewardConfig(BaseModel):
         return v
 
 
+
 class RLConfig(BaseModel):
     policy_name: str = "MlpPolicy"
     n_steps: int

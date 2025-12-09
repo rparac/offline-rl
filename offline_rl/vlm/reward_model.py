@@ -133,7 +133,7 @@ def load_reward_model_from_config(config: CLIPRewardConfig) -> CLIPReward:
 
 
 def compute_rewards(
-    model: CLIPEmbed,
+    model: CLIPReward,
     frames: torch.Tensor,
     batch_size: int,
     num_workers: int,
