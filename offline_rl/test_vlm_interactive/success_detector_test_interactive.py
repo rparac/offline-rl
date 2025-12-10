@@ -77,15 +77,49 @@ def _visualize_image(obs, output_dir="debug_env_images", episode=0, step_idx=0):
 
 
 def _initialize_similarity_model():
-    goal_prompt = "robot is on top of pickaxe"
-    negative_prompts = [
-        "robot is on top of empty cell",
-        "robot is on top of gem",
-        "robot is on top of door",
-        "robot is on top of lava",
+    """
+    goal_prompt: pickaxe missing
+    negative_prompts: [
+        all_cells_empty
+        diamond not visible
+        door not visible
+        lava not visible
     ]
 
-    model_name = "ViT-bigG-14/laion2b_s39b_b160k"
+    """
+
+
+
+    context = "A screenshot of a 2D pygame grid world. "
+    goal_prompt = context + "A robot character standing over and partially hiding a pickaxe icon on a white background."
+    negative_prompts = [
+        context + "A robot character standing alone on a white tile with no other objects",
+        context + "A robot character standing over and partially hiding a blue diamond gem icon on a white background",
+        context + "A robot character standing over and partially hiding a red door icon on a white background",
+        context + "A robot character standing on top of orange magma texture",
+    ]
+
+    goal_prompt = context + "A robot, blue diamond gem, red door, and orange magma texture are clearly visible in the image."
+    negative_prompts = [
+        context + "A robot, a pickaxe, blue diamond gem, red door, and orange magma texture are clearly visible in the image. ",
+        context + "A robot, a pickaxe, red door, and orange magma texture are clearly visible in the image.",
+        context + "A robot, a pickaxe, blue diamond gem, and orange magma texture are clearly visible in the image.",
+        context + "A robot, a pickaxe, blue diamond gem, and red door are clearly visible in the image.",
+    ]
+
+    # goal_prompt = "A robot standing on a square containing a pickaxe."
+    # negative_prompts = [
+    #     "A robot standing on a square containing a diamond gem.",
+    #     "A robot standing on a square containing a red door.",
+    #     "A robot standing on a square containing orange magma texture.",
+    #     "A robot standing on an empty white square.",
+    # ]
+
+
+
+    model_name = "ViT-L-14/openai"
+    # model_name = "ViT-B-32/openai"
+    # model_name = "ViT-bigG-14/laion2b_s39b_b160k"
     
     similarity_model = load_similarity_model(
         model_name=model_name,
