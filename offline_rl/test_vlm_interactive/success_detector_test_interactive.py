@@ -99,12 +99,12 @@ def _initialize_similarity_model():
         context + "A robot character standing on top of orange magma texture",
     ]
 
-    goal_prompt = context + "A robot, blue diamond gem, red door, and orange magma texture are clearly visible in the image."
+    goal_prompt = context + "A robot, blue diamond gem, opened double door, and orange magma texture are clearly visible in the image."
     negative_prompts = [
-        context + "A robot, a pickaxe, blue diamond gem, red door, and orange magma texture are clearly visible in the image. ",
-        context + "A robot, a pickaxe, red door, and orange magma texture are clearly visible in the image.",
+        context + "A robot, a pickaxe, blue diamond gem, opened double door, and orange magma texture are clearly visible in the image. ",
+        context + "A robot, a pickaxe, opened double door, and orange magma texture are clearly visible in the image.",
         context + "A robot, a pickaxe, blue diamond gem, and orange magma texture are clearly visible in the image.",
-        context + "A robot, a pickaxe, blue diamond gem, and red door are clearly visible in the image.",
+        context + "A robot, a pickaxe, blue diamond gem, and opened double door are clearly visible in the image.",
     ]
 
     # goal_prompt = "A robot standing on a square containing a pickaxe."
