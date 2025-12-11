@@ -106,6 +106,13 @@ def _initialize_similarity_model():
         context + "A robot, a pickaxe, blue diamond gem, and orange magma texture are clearly visible in the image.",
         context + "A robot, a pickaxe, blue diamond gem, and opened double door are clearly visible in the image.",
     ]
+    goal_prompt = "Grey and yellow pickaxe"
+    negative_prompts = [
+        "Blue diamond gem",
+        "Open red double door",
+        "Orange and yellow magma texture",
+    ]
+
 
     # goal_prompt = "A robot standing on a square containing a pickaxe."
     # negative_prompts = [
@@ -166,6 +173,29 @@ def main() -> None:
             neg_similarity = similarities[0, i + 1].item()
             print(f"    {neg_prompt}: {neg_similarity:.4f}")
         print()
+    
+    def print_episode_summary(episode_num, episode_similarities):
+        """Print min and second smallest values for each prompt at the end of an episode."""
+        print(f"\n{'='*60}")
+        print(f"Episode {episode_num} Summary - Min/Second Smallest Similarity Values")
+        print(f"{'='*60}")
+        for prompt, values in episode_similarities.items():
+            if len(values) > 0:
+                min_val = min(values)
+                if len(values) > 1:
+                    # Get second smallest by sorting and taking the second element
+                    sorted_values = sorted(values)
+                    second_smallest = sorted_values[1]
+                    print(f"  {prompt}:")
+                    print(f"    Min: {min_val:.4f}")
+                    print(f"    Second Smallest: {second_smallest:.4f}")
+                else:
+                    print(f"  {prompt}:")
+                    print(f"    Min: {min_val:.4f}")
+                    print(f"    Second Smallest: N/A (only one value)")
+            else:
+                print(f"  {prompt}: No values recorded")
+        print(f"{'='*60}\n")
 
     # Reset the environment (gymnasium returns tuple)
     obs, info = env.reset()
@@ -179,6 +209,17 @@ def main() -> None:
     
     terminated = False
     truncated = False
+    
+    # Track similarity values for each prompt during the episode
+    episode_similarities = {
+        goal_prompt: [],
+        **{prompt: [] for prompt in negative_prompts}
+    }
+    
+    # Track initial similarities
+    episode_similarities[goal_prompt].append(similarities[0, 0].item())
+    for i, neg_prompt in enumerate(negative_prompts):
+        episode_similarities[neg_prompt].append(similarities[0, i + 1].item())
 
     try:
         while True:
@@ -196,9 +237,18 @@ def main() -> None:
                 step_idx = 0
                 episode += 1
                 print("Environment reset.")
+                # Reset tracking for new episode
+                episode_similarities = {
+                    goal_prompt: [],
+                    **{prompt: [] for prompt in negative_prompts}
+                }
                 similarities = _compute_similarities(similarity_model, obs)
                 goal_similarity = similarities[0, 0].item()
                 print(f"VLM {goal_prompt} is {goal_similarity:.4f}")
+                # Track initial similarities after reset
+                episode_similarities[goal_prompt].append(similarities[0, 0].item())
+                for i, neg_prompt in enumerate(negative_prompts):
+                    episode_similarities[neg_prompt].append(similarities[0, i + 1].item())
                 # Save render after reset
                 continue
 
@@ -226,6 +276,11 @@ def main() -> None:
             goal_similarity = similarities[0, 0].item()
             print(f"VLM {goal_prompt} is {goal_similarity:.4f}")
             
+            # Track similarities for this step
+            episode_similarities[goal_prompt].append(similarities[0, 0].item())
+            for i, neg_prompt in enumerate(negative_prompts):
+                episode_similarities[neg_prompt].append(similarities[0, i + 1].item())
+            
             # Convert tensors to Python types if needed
             if isinstance(obs, torch.Tensor):
                 obs = obs.cpu().numpy()
@@ -236,6 +291,10 @@ def main() -> None:
             step_idx += 1
 
             print_step_result(step_idx, action_name, similarities, terminated, truncated, info)
+            
+            # Print episode summary if episode ended
+            if terminated or truncated:
+                print_episode_summary(episode, episode_similarities)
             
 
     finally:

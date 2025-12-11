@@ -1,3 +1,4 @@
+
 from typing import List, Optional, Tuple, overload
 import open_clip
 import torch
@@ -23,28 +24,30 @@ Episode 3 Summary - Min/Second Smallest Similarity Values
   Orange and yellow magma texture:
     Min: 0.1488
     Second Smallest: 0.1536
-============================================================""
+============================================================
 """
+prompts_with_thresholds = {
+    "Grey and yellow pickaxe": (0.1080 + 0.1407) / 2,
+    "Blue diamond gem": (0.1191 + 0.1475) / 2,
+    "Open red double door": (0.1326 + 0.1738) / 2,
+    "Orange and yellow magma texture": (0.1488 + 0.1536) / 2,
+}
 
-class CLIPSimilarityModel(nn.Module):
+
+
+class VisualMinecraftCLIPSimilarityModel(nn.Module):
     def __init__(
         self,
         *,
         model: CLIPEmbed,  # The CLIP model wrapper for embedding images and text
-        goal_prompt: torch.Tensor,  # Tokenized tensor representing the goal prompt
-        negative_prompts: torch.Tensor,  # Tokenized tensor representing the negative prompts
-        temperature: float = 0.01,  # Temperature parameter for softmax, affects sharpness (value taken from CLIP)
+        prompts: torch.Tensor, # Tokenized tensor representing the prompts
     ) -> None:
         super().__init__()
         self.embed_module = model
-        prompts = torch.cat([goal_prompt, negative_prompts], dim=0)
         self.num_prompts = len(prompts)
 
-        self._goal_prompt_idx = 0
         embedded_prompts = self.embed_prompts(prompts)
         self.register_buffer("_embedded_prompts", embedded_prompts)
-
-        self._temperature = temperature
 
     @torch.inference_mode()
     def forward(self, embedded_images: torch.Tensor) -> torch.Tensor:
@@ -71,26 +74,40 @@ class CLIPSimilarityModel(nn.Module):
     def embed_images(self, x):
         return self.embed_module.forward(x)
 
-def load_similarity_model(
-    model_name, goal_prompt: str, negative_prompts: List[str], cache_dir: Optional[str] = None
+
+def load_visual_minecraft_similarity_model(
+    model_name, cache_dir: Optional[str] = None
 ):
     model_name_prefix, pretrained = model_name.split("/")
     model = open_clip.create_model(
         model_name=model_name_prefix, pretrained=pretrained, cache_dir=cache_dir
     )
-    goal_prompt = CLIPSimilarityModel.tokenize_prompts([goal_prompt])
-    negative_prompts = CLIPSimilarityModel.tokenize_prompts(negative_prompts)
+    prompts = list(prompts_with_thresholds.keys())
+    tokenized_prompts = VisualMinecraftCLIPSimilarityModel.tokenize_prompts(prompts)
     model = CLIPEmbed(model)
-    model = CLIPSimilarityModel(
+    model = VisualMinecraftCLIPSimilarityModel(
         model=model, 
-        goal_prompt=goal_prompt,
-        negative_prompts=negative_prompts,
+        prompts=tokenized_prompts,
     )
     return model.eval()
 
+def compute_visual_minecraft_labels(
+    model: VisualMinecraftCLIPSimilarityModel,
+    frames: torch.Tensor,
+    batch_size: int,
+    num_workers: int,
+    worker_frames_tensor=None,
+) -> torch.Tensor:
+    similarities = compute_visual_minecraft_similarities(model, frames, batch_size, num_workers, worker_frames_tensor)
 
-def compute_similarities(
-    model: CLIPSimilarityModel,
+    thresholds = torch.tensor(list(prompts_with_thresholds.values()), device=similarities.device)
+
+    labels = similarities < thresholds.unsqueeze(0)
+
+    return labels
+
+def compute_visual_minecraft_similarities(
+    model: VisualMinecraftCLIPSimilarityModel,
     frames: torch.Tensor,
     batch_size: int,
     num_workers: int,
@@ -121,7 +138,7 @@ def compute_similarities(
 @overload
 def dist_worker_compute_similarity(
     rank: int,
-    success_model: CLIPSimilarityModel,
+    success_model: VisualMinecraftCLIPSimilarityModel,
     render_dim: Tuple[int, int, int],
     batch_size: int,
     num_workers: int,
@@ -133,7 +150,7 @@ def dist_worker_compute_similarity(
 @overload
 def dist_worker_compute_similarity(
     rank: int,
-    success_model: CLIPSimilarityModel,
+    success_model: VisualMinecraftCLIPSimilarityModel,
     render_dim: Tuple[int, int, int],
     batch_size: int,
     num_workers: int,
@@ -144,7 +161,7 @@ def dist_worker_compute_similarity(
 
 def dist_worker_compute_similarity(
     rank: int,
-    success_model: CLIPSimilarityModel,
+    success_model: VisualMinecraftCLIPSimilarityModel,
     render_dim: Tuple[int, int, int],
     batch_size: int,
     num_workers: int,
