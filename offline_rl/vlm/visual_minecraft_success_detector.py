@@ -106,6 +106,19 @@ def compute_visual_minecraft_labels(
 
     return labels
 
+
+def compute_visual_minecraft_rewards(
+    model: VisualMinecraftCLIPSimilarityModel,
+    frames: torch.Tensor,
+    batch_size: int,
+    num_workers: int,
+    worker_frames_tensor=None,
+) -> torch.Tensor:
+    task = 0
+
+    labels = compute_visual_minecraft_labels(model, frames, batch_size, num_workers, worker_frames_tensor).to(torch.float32)
+    return labels[:, task]
+
 def compute_visual_minecraft_similarities(
     model: VisualMinecraftCLIPSimilarityModel,
     frames: torch.Tensor,
@@ -186,5 +199,27 @@ def dist_worker_compute_similarity(
         else:
             return None
 
-    raise NotImplementedError("Distributed computation of similarity is not implemented")
+    if rank == 0:
+        if frames is None:
+            raise ValueError("Must pass render result on rank=0")
+        if len(frames) != num_workers * batch_size:
+            raise ValueError("Must pass render result with correct batch size")
+        scatter_list = [t.cuda(rank) for t in torch.chunk(frames, num_workers, dim=0)]
+    else:
+        scatter_list = []
+
+    worker_frames = worker_frames_tensor if worker_frames_tensor is not None else torch.zeros((batch_size, *render_dim), dtype=torch.uint8).cuda(rank)
+    dist.scatter(worker_frames, scatter_list=scatter_list, src=0)
+    with torch.no_grad():
+        embeddings = success_model.embed_module(worker_frames)
+        similaries = success_model(embeddings)
+
+    def zero_t():
+        return torch.zeros_like(similaries)
+
+    recv_similaries = [zero_t() for _ in range(num_workers)] if rank == 0 else []
+    dist.gather(similaries, gather_list=recv_similaries, dst=0)
+
+    if rank == 0:
+        return torch.cat(recv_similaries, dim=0).cuda(rank)
     

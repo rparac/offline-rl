@@ -7,10 +7,10 @@ from gymnasium.wrappers import DtypeObservation
 from PIL import Image
 import numpy as np
 
-from env.visual_minecraft.env import GridWorldEnv
+from env.visual_minecraft.fixed_len_env import GridWorldEnv
 from offline_rl.vlm.open_clip.transform import image_transform
 from offline_rl.vlm.success_detector import compute_similarities, load_similarity_model
-from offline_rl.vlm.visual_minecraft_success_detector import compute_visual_minecraft_labels, load_visual_minecraft_similarity_model, prompts_with_thresholds
+from offline_rl.vlm.visual_minecraft_success_detector import compute_visual_minecraft_labels, compute_visual_minecraft_rewards, load_visual_minecraft_similarity_model, prompts_with_thresholds
     
 batch_size = 1
 num_workers = 1
@@ -18,18 +18,19 @@ num_workers = 1
 class ImageObsWrapper(gymnasium.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(3, 64, 64), dtype=np.uint8)
+        self.observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
     
     def observation(self, obs):
         obs = np.clip(obs * 255.0, a_min=0, a_max=255).astype(np.uint8)
         return torch.from_numpy(obs).unsqueeze(0).to(torch.uint8)
 
 def setup_visual_minecraft(device: torch.device = torch.device("cpu")):
-    env_id = "VisualMinecraft-v0"
+    env_id = "FixedLenVisualMinecraft-v0"
 
     items = ["pickaxe", "lava", "door", "gem", "empty"]
     formula = "(F c0)", 5, "task0: visit({1})".format(*items)
     kwargs = {
+        "episode_length": 10,
         "formula": formula,
         "render_mode": "human",
         "state_type": "image",
@@ -179,6 +180,8 @@ def main() -> None:
             obs, reward, terminated, truncated, info = env.step(action)
             _visualize_image(obs, episode=episode, step_idx=step_idx)
             predicated_labels = _compute_labels(similarity_model, obs)
+            vlm_predicted_reward = compute_visual_minecraft_rewards(similarity_model, obs, batch_size, num_workers, worker_frames_tensor=None)
+            print(f"VLM predicted reward: {vlm_predicted_reward}")
             step_idx += 1
 
             print_step_result(step_idx, action_name, predicated_labels, terminated, truncated, info)

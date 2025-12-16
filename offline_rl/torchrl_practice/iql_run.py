@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import wandb
 
-from offline_rl.torch_rl_utils import define_network, define_loss_module, evaluate_policy, setup_data, setup_visual_minecraft_with_wrapper, generate_q_table, generate_v_table
+from offline_rl.torchrl_practice.torch_rl_utils import define_network, define_loss_module, evaluate_policy, setup_data, setup_visual_minecraft_with_wrapper, generate_q_table, generate_v_table
 
 
 device = "cuda"

@@ -20,7 +20,7 @@ RENDER_DIM = {
 
 
 class Config(BaseModel):
-    env_name: Literal["CartPole-v1", "Humanoid-v4", "MountainCarContinuous-v0"]
+    env_name: Literal["CartPole-v1", "Humanoid-v4", "MountainCarContinuous-v0", "VisualMinecraft-v0"]
     base_path: pathlib.Path
     seed: int
     description: str
@@ -31,7 +31,7 @@ class Config(BaseModel):
 
     # Auto-injected properties
     run_hash: str
-    commit_hash: str
+    # commit_hash: str
 
     def save(self) -> None:
         with open(self.dump_path, "w") as f:
@@ -84,7 +84,7 @@ class Config(BaseModel):
     def configure_properties(cls, data: Any) -> Any:
         assert isinstance(data, dict)
         data["run_hash"] = util.get_run_hash()
-        data["commit_hash"] = util.get_git_commit_hash()
+        # data["commit_hash"] = util.get_git_commit_hash()
         if "base_path" not in data:
             data["base_path"] = pathlib.Path.cwd() / "runs/training"
         return data

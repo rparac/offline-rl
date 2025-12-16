@@ -17,7 +17,7 @@ num_workers = 1
 class ImageObsWrapper(gymnasium.ObservationWrapper):
     def __init__(self, env):
         super().__init__(env)
-        self.observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(3, 64, 64), dtype=np.uint8)
+        self.observation_space = gymnasium.spaces.Box(low=0, high=255, shape=(3, 224, 224), dtype=np.uint8)
     
     def observation(self, obs):
         obs = np.clip(obs * 255.0, a_min=0, a_max=255).astype(np.uint8)

@@ -15,7 +15,7 @@ from tensordict import TensorDict
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyArrowPatch
 
-from offline_rl.env_util import setup_visual_minecraft_with_wrapper
+from offline_rl.torchrl_practice.env_util import setup_visual_minecraft_with_wrapper
 
 seed = 42
 torch.manual_seed(seed)

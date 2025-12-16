@@ -5,8 +5,8 @@ from pathlib import Path
 import numpy as np
 import gymnasium as gym
 
-from offline_rl.env_util import setup_visual_minecraft
-from offline_rl.torch_rl_utils import generate_q_table
+from offline_rl.torchrl_practice.env_util import setup_visual_minecraft
+from offline_rl.torchrl_practice.torch_rl_utils import generate_q_table
 
 
 def epsilon_greedy_action(q_table, state, epsilon, action_space):

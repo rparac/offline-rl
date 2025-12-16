@@ -3,8 +3,8 @@ import warnings
 from PIL import Image
 from torch.distributions import Categorical
 
-from offline_rl.env_util import setup_visual_minecraft_with_wrapper, setup_visual_minecraft
-from offline_rl.networks import ActorNet, VNet
+from offline_rl.torchrl_practice.env_util import setup_visual_minecraft_with_wrapper, setup_visual_minecraft
+from offline_rl.torchrl_practice.networks import ActorNet, VNet
 warnings.filterwarnings("ignore")
 from torch import multiprocessing
 

@@ -5,7 +5,7 @@ from tensordict import TensorDict
 from PIL import Image
 import numpy as np
 
-from offline_rl.env_util import setup_visual_minecraft_with_wrapper
+from offline_rl.torchrl_practice.env_util import setup_visual_minecraft_with_wrapper
 
 def save_render_image(env, output_dir: Path, step_idx: int, episode: int = 0):
     """Render the environment and save the image."""

@@ -17,8 +17,8 @@ from tensordict import TensorDict
 
 import numpy as np
 
-from offline_rl.env_util import setup_visual_minecraft_with_wrapper
-from offline_rl.networks import ActorNet, QNet, VNet
+from offline_rl.torchrl_practice.env_util import setup_visual_minecraft_with_wrapper
+from offline_rl.torchrl_practice.networks import ActorNet, QNet, VNet
 
 
 @torch.no_grad()

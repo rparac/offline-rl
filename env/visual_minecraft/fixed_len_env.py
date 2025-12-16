@@ -36,7 +36,8 @@ transforms = torchvision.transforms.Compose([
 class GridWorldEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    def __init__(self, formula, render_mode="human", state_type="symbolic", use_dfa_state=True, train=True, size=4, random_start=False):
+    def __init__(self, formula, episode_length, render_mode="human", state_type="symbolic", use_dfa_state=True, train=True, size=4, random_start=False):
+        self.episode_length = episode_length
         self.dictionary_symbols = ['P', 'L', 'D', 'G', 'E']
         vis_minecraft_folder = Path(__file__).parent.absolute()
         dir_prefix = f"{vis_minecraft_folder}/imgs"
@@ -279,13 +280,18 @@ class GridWorldEnv(gym.Env):
             raise Exception("environment with state_type = {} NOT IMPLEMENTED".format(self.state_type))
 
         #          success            failure                  timeout
-        terminated = self.automaton.is_accepting_state(self.curr_automaton_state)
-        truncated = (self.curr_step >= self.max_num_steps) and not terminated
-
         info = self._get_info(potential)
         info = {"rew_dict": info}
         label_info = self._get_label_info()
         info.update(label_info)
+
+
+        terminated = self.automaton.is_accepting_state(self.curr_automaton_state)
+        info["success"] = terminated
+
+        terminated = self.curr_step >= self.episode_length
+        truncated = (self.curr_step >= self.max_num_steps) and not terminated
+
 
         return observation, reward, terminated, truncated, info  # , sym
 

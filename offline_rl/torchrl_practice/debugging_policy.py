@@ -2,12 +2,12 @@
 import time
 
 import torch
-from offline_rl.dataset_generator import QTablePolicy
+from offline_rl.torchrl_practice.dataset_generator import QTablePolicy
 from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from offline_rl.env_util import setup_visual_minecraft
+from offline_rl.torchrl_practice.env_util import setup_visual_minecraft
 
 q_table_path = Path("artifacts/q_table.npy")
 q_table = np.load(q_table_path)
