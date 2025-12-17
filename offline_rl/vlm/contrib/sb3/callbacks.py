@@ -110,9 +110,14 @@ class VideoRecorderCallback(BaseCallback):
                 n_eval_episodes=self._n_eval_episodes,
                 deterministic=self._deterministic,
             )
+            # Remove last screen because it is the reset state of the next episode
+            # TODO: Resolve warning /home/rp218/miniconda3/envs/offline_rl/lib/python3.10/site-packages/stable_baselines3/common/evaluation.py:70: UserWarning: Evaluation environment is not wrapped with a ``Monitor`` wrapper. This may result in reporting modified episode lengths and rewards, if other wrappers happen to modify these. Consider wrapping environment first with ``Monitor`` wrapper.
+            #  This could have an impact on this line
+            screens = screens[:-1]
+
             self.logger.record(
                 "trajectory/video",
-                Video(th.ByteTensor(array([screens])), fps=40),
+                Video(th.ByteTensor(array([screens])), fps=1),
                 exclude=("stdout", "log", "json", "csv"),
             )
         return True

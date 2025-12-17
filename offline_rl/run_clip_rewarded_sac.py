@@ -5,7 +5,7 @@ from offline_rl.vlm.trainer.train import train, train_simple
 
 config = """
 env_name: VisualMinecraft-v0 # RL environment name
-base_path: /home/rp218/projects/offline_rl # Base path to save logs and checkpoints
+base_path: /data/private/rp218/offline-rl # Base path to save logs and checkpoints
 seed: 42 # Seed for reproducibility
 description: VisualMinecraft training using CLIP reward
 tags: # Wandb tags

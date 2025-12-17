@@ -178,6 +178,9 @@ def main() -> None:
 
             # Step the environment (gymnasium returns tuple)
             obs, reward, terminated, truncated, info = env.step(action)
+            # obs_new = env.render()
+            # from PIL import Image
+            # Image.fromarray(obs_new).save(f"debug_env_images/2_episode_{episode}_step_{step_idx}.png")
             _visualize_image(obs, episode=episode, step_idx=step_idx)
             predicated_labels = _compute_labels(similarity_model, obs)
             vlm_predicted_reward = compute_visual_minecraft_rewards(similarity_model, obs, batch_size, num_workers, worker_frames_tensor=None)
