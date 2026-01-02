@@ -46,9 +46,9 @@ optimizer = torch.optim.Adam(model.parameters(), lr=0.0003)
 
 replay_buffer = ReplayBuffer(storage=LazyTensorStorage(max_size=10000))
 
-iterations = 50_000  # Set to 50_000 to reproduce the results below
+iterations = 500_000  # Set to 50_000 to reproduce the results below
 frames_per_batch = 10
-eval_interval = 500
+eval_interval = 5000
 batch_size = 32
 learning_rate = 0.0003
 tau = 0.005  # Target network soft update coefficient
@@ -97,12 +97,24 @@ for i, data in enumerate(tqdm(collector, total=num_batched_iterations)):
                 "episode/reward_mean": episode_rewards.mean().item(),
             }, step=i)
     
-    # Log done statistics
-    if "next" in data.keys() and "done" in data["next"].keys():
+    # Log done statistics and episode lengths using StepCounter
+    if (
+        "next" in data.keys()
+        and "done" in data["next"].keys()
+        and "step_count" in data["next"].keys()
+    ):
         dones = data["next", "done"]
+        step_counts = data["next", "step_count"]
         if dones.numel() > 0:
             done_rate = dones.float().mean().item()
             wandb.log({"episode/done_rate": done_rate}, step=i)
+
+            # Use StepCounter: step_count at done=True is the episode length
+            if dones.any():
+                episode_lengths = step_counts[dones].float()
+                wandb.log({
+                    "episode/length": episode_lengths.mean().item(),
+                }, step=i)
 
 
     optimizer.zero_grad()
