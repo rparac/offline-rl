@@ -19,12 +19,12 @@ frames = torch.from_numpy(image_array).unsqueeze(0).to(torch.uint8)
 
 config = CLIPRewardConfig(
     name="clip",
-    pretrained_model="ViT-L-14/laion2b_s32b_b82k",
+    pretrained_model="ViT-L-14/openai",
     batch_size=batch_size,
     alpha=0.1,
     target_prompts=target_prompts,
     baseline_prompts=baseline_prompts,
-    cache_dir="vlm/cache",
+    cache_dir="/data/private/rp218/open_clip",
 )
 
 # Load and move model to CUDA - keeping everything in float32 (default)

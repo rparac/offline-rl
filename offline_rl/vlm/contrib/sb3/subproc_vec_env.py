@@ -33,6 +33,6 @@ class SubprocVecEnv(StableBaselines3SubprocVecEnv):
 
     def step_wait(self):
         obs, rew, done, infos = super().step_wait()
-        render_array = self.get_images()
-        infos[0]["render_array"] = render_array
+        # render_array = self.get_images()
+        # infos[0]["render_array"] = render_array
         return obs, rew, done, infos

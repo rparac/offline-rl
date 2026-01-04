@@ -103,7 +103,7 @@ class VideoRecorderCallback(BaseCallback):
                 # PyTorch uses CxHxW vs HxWxC gym (and tensorflow) image convention
                 screens.append(screen.transpose(2, 0, 1))
 
-            evaluate_policy(
+            mean_reward, std_reward = evaluate_policy(
                 self.model,
                 self._eval_env,
                 callback=grab_screens,
@@ -115,11 +115,18 @@ class VideoRecorderCallback(BaseCallback):
             #  This could have an impact on this line
             screens = screens[:-1]
 
+            # Log episode length and video at the same step (self.n_calls)
+            self.logger.record(
+                "trajectory/reward", 
+                mean_reward, 
+                exclude=("stdout", "log", "json", "csv")
+            )
             self.logger.record(
                 "trajectory/video",
                 Video(th.ByteTensor(array([screens])), fps=1),
                 exclude=("stdout", "log", "json", "csv"),
             )
+
         return True
 
 

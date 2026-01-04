@@ -16,7 +16,7 @@ from stable_baselines3.common.callbacks import CallbackList
 
 import offline_rl.vlm.contrib.sb3.signal_handler as signal_handler
 import wandb
-from offline_rl.vlm import multiprocessing
+from offline_rl.vlm import custom_multiprocessing
 from offline_rl.vlm.util import util
 from offline_rl.vlm.contrib.sb3.base import get_clip_rewarded_rl_algorithm_class
 from offline_rl.vlm.contrib.sb3.callbacks import VideoRecorderCallback, WandbCallback
@@ -46,7 +46,7 @@ def showwarning_with_traceback(
 def primary_worker(
     config: Config,
     config_dump: Dict[str, Any],
-    stop_event: Optional[multiprocessing.Event] = None,
+    stop_event: Optional[custom_multiprocessing.Event] = None,
 ):
     # logger.add(config.log_file, enqueue=True)
     torch.cuda.manual_seed(config.seed)
@@ -200,7 +200,7 @@ def train(config: str):
         if config_obj.is_clip_rewarded:
             logger.info("Running CLIP-rewarded SAC. Spawning workers.")
             args = ("nccl", config_obj, config_dump)
-            multiprocessing.spawn(
+            custom_multiprocessing.spawn(
                 fn=init_process,
                 args=args,
                 nprocs=config_obj.rl.n_workers,
@@ -217,7 +217,7 @@ def train(config: str):
 
 def init_process(
     rank: int,
-    stop_event: multiprocessing.Event,
+    stop_event: custom_multiprocessing.Event,
     /,
     backend: str,
     config: Config,
@@ -235,7 +235,7 @@ def init_process(
         clip_inference_worker(rank, config, stop_event)
 
 
-def clip_inference_worker(rank: int, config: Config, stop_event: multiprocessing.Event):
+def clip_inference_worker(rank: int, config: Config, stop_event: custom_multiprocessing.Event):
     # logger.add(config.log_file, enqueue=True)
     assert isinstance(config.reward, CLIPRewardConfig)
     assert config.reward.batch_size % config.rl.n_workers == 0

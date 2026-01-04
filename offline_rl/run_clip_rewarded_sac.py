@@ -37,11 +37,16 @@ rl:
   episode_length: 50 # Desired episode length
   learning_starts: 100 # Number of env steps to collect before training
   train_freq: 200 # Number of collected env steps between training iterations
-  batch_size: 64 # SAC buffer sample size per gradient step
+  batch_size: 1024 # SAC buffer sample size per gradient step
   gradient_steps: 1 # Number of samples to collect from the buffer per training step
   tau: 0.005 # SAC target network update rate
   gamma: 0.99 # SAC discount factor
   learning_rate: 3e-4 # SAC optimizer learning rate
+  buffer_size: 10000 # SAC buffer size
+  rl_kwargs:
+    exploration_initial_eps: 1.0
+    exploration_final_eps: 0.1
+    exploration_fraction: 0.7
 logging:
   checkpoint_freq: 800 # Number of env steps between checkpoints
   video_freq: 800 # Number of env steps between videos

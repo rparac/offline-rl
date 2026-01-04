@@ -74,9 +74,6 @@ class CLIPRewardedDQN(DQN):  # TODO: Refactor (mixin)
                 dtype=torch.uint8,
             ).cuda(0)
 
-    def _dump_logs(self) -> None:
-        pass
-
     def _load_modules(self):
         similarity_model = load_visual_minecraft_similarity_model(
             model_name="ViT-L-14/openai",
@@ -98,7 +95,7 @@ class CLIPRewardedDQN(DQN):  # TODO: Refactor (mixin)
         env_episodes = total_episodes // self.env.num_envs
         assert self.config.rl.episode_length == env_episode_timesteps // env_episodes
 
-        frames = torch.from_numpy(np.array(self.replay_buffer.render_arrays))
+        frames = torch.from_numpy(np.array(self.replay_buffer.obs_arrays))
         frames = rearrange(frames, "n_steps n_envs ... -> (n_steps n_envs) ...")
         assert frames.shape[1:] == self.config.render_dim
         rewards = compute_visual_minecraft_rewards(
@@ -115,30 +112,30 @@ class CLIPRewardedDQN(DQN):  # TODO: Refactor (mixin)
         ).numpy()
         self.replay_buffer.clear_render_arrays()
 
-        if replay_buffer_pos - env_episode_timesteps >= 0:
-            self.replay_buffer.rewards[
-                replay_buffer_pos - env_episode_timesteps : replay_buffer_pos, :
-            ] = rewards[:, :]
-        else:
-            # Split reward assignment (circular buffer)
-            self.replay_buffer.rewards[
-                -(env_episode_timesteps - replay_buffer_pos) :, :
-            ] = rewards[: env_episode_timesteps - replay_buffer_pos, :]
-            self.replay_buffer.rewards[:replay_buffer_pos, :] = rewards[
-                env_episode_timesteps - replay_buffer_pos :, :
-            ]
+        # if replay_buffer_pos - env_episode_timesteps >= 0:
+        #     self.replay_buffer.rewards[
+        #         replay_buffer_pos - env_episode_timesteps : replay_buffer_pos, :
+        #     ] = rewards[:, :]
+        # else:
+        #     # Split reward assignment (circular buffer)
+        #     self.replay_buffer.rewards[
+        #         -(env_episode_timesteps - replay_buffer_pos) :, :
+        #     ] = rewards[: env_episode_timesteps - replay_buffer_pos, :]
+        #     self.replay_buffer.rewards[:replay_buffer_pos, :] = rewards[
+        #         env_episode_timesteps - replay_buffer_pos :, :
+        #     ]
 
-        # The total rewards are indexed by environment
-        rewards = rearrange(rewards, "n_steps n_envs -> n_envs n_steps")
-        for env_idx in range(self.env.num_envs):
-            # Compute sum of rewards per episode
-            rewards_per_episode = np.sum(
-                np.reshape(
-                    rewards[env_idx], (env_episodes, self.config.rl.episode_length)
-                ),
-                axis=1,
-            )
-            self.ep_clip_info_buffer.extend([rewards_per_episode.tolist()])
+        # # The total rewards are indexed by environment
+        # rewards = rearrange(rewards, "n_steps n_envs -> n_envs n_steps")
+        # for env_idx in range(self.env.num_envs):
+        #     # Compute sum of rewards per episode
+        #     rewards_per_episode = np.sum(
+        #         np.reshape(
+        #             rewards[env_idx], (env_episodes, self.config.rl.episode_length)
+        #         ),
+        #         axis=1,
+        #     )
+        #     self.ep_clip_info_buffer.extend([rewards_per_episode.tolist()])
 
     def collect_rollouts(self, *args, **kwargs) -> RolloutReturn:
         rollout = super().collect_rollouts(*args, **kwargs)
@@ -156,15 +153,15 @@ class CLIPRewardedDQN(DQN):  # TODO: Refactor (mixin)
         self.logger.record("time/episodes", self._episode_num, exclude="tensorboard")
         if len(self.ep_info_buffer) > 0 and len(self.ep_info_buffer[0]) > 0:
             self.logger.record(
-                "rollout/ep_clip_rew_mean",
+                "rollout/my_ep_clip_rew_mean",
                 safe_mean([ep_reward for ep_reward in self.ep_clip_info_buffer]),
             )
             self.logger.record(
-                "rollout/ep_gt_rew_mean",
+                "rollout/my_ep_gt_rew_mean",
                 safe_mean([ep_info["r"] for ep_info in self.ep_info_buffer]),
             )
             self.logger.record(
-                "rollout/ep_len_mean",
+                "rollout/my_ep_len_mean",
                 safe_mean([ep_info["l"] for ep_info in self.ep_info_buffer]),
             )
         self.logger.record("time/fps", fps)

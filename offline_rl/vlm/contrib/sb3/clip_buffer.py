@@ -27,6 +27,7 @@ class CLIPReplayBuffer(ReplayBuffer):
             handle_timeout_termination,
         )
         self.render_arrays: List[NDArray] = []
+        self.obs_arrays: List[NDArray] = []
 
     def add(
         self,
@@ -45,9 +46,10 @@ class CLIPReplayBuffer(ReplayBuffer):
             done,
             infos,
         )
-
-        assert len(self.render_arrays) < self.buffer_size
-        self.render_arrays.append(infos[0]["render_array"])
+        assert len(self.obs_arrays) < self.buffer_size
+        # Permute to (N, H, W, C)
+        self.obs_arrays.append(obs.transpose(0, 2, 3, 1))
 
     def clear_render_arrays(self) -> None:
         self.render_arrays = []
+        self.obs_arrays = []

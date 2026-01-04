@@ -117,6 +117,12 @@ def compute_visual_minecraft_rewards(
     task = 0
 
     labels = compute_visual_minecraft_labels(model, frames, batch_size, num_workers, worker_frames_tensor).to(torch.float32)
+
+    # from PIL import Image
+    # for i, label in enumerate(labels):
+    #     img = Image.fromarray(frames[i].cpu().numpy().transpose(1, 2, 0))
+    #     img.save(f"label_{i}.png")
+
     return labels[:, task]
 
 def compute_visual_minecraft_similarities(
