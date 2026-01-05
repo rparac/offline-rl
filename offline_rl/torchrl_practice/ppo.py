@@ -3,7 +3,7 @@ import warnings
 from PIL import Image
 from torch.distributions import Categorical
 
-from offline_rl.torchrl_practice.env_util import setup_visual_minecraft_with_wrapper, setup_visual_minecraft
+from offline_rl.torchrl_practice.env_util import record_policy_video, setup_visual_minecraft_with_wrapper, setup_visual_minecraft
 from offline_rl.torchrl_practice.networks import ActorNet, VNet
 warnings.filterwarnings("ignore")
 from torch import multiprocessing
@@ -21,62 +21,13 @@ from torchrl.collectors import MultiSyncDataCollector, MultiaSyncDataCollector, 
 from torchrl.data.replay_buffers import ReplayBuffer
 from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
 from torchrl.data.replay_buffers.storages import LazyTensorStorage
-from torchrl.envs.utils import ExplorationType, set_exploration_type
+from torchrl.envs.utils import ExplorationType, set_exploration_type, step_mdp
 from torchrl.envs import ParallelEnv
 from torchrl.modules import ProbabilisticActor
 from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 from torchrl.record.loggers.wandb import WandbLogger
 from tqdm import tqdm
-
-def record_policy_video(policy, max_steps=10, seed=42, device=None):
-    """
-    Record a policy rollout as a video and return frames for logging.
-    
-    Args:
-        policy: The policy to evaluate
-        max_steps: Maximum number of steps in the rollout
-        seed: Random seed for reproducibility
-        device: Device to run policy on
-        
-    Returns:
-        frames: Tensor of shape (T, C, H, W) representing video frames
-    """
-    
-    # Create a separate environment for rendering with rgb_array mode
-    render_env = setup_visual_minecraft_with_wrapper(device=device)
-
-    td = render_env.reset()
-
-    # Img is a numpy array of shape (512, 512, 3)
-    imgs = []
-    img = render_env.render()
-    imgs.append(img)
-    
-    done = False
-    step_count = 0
-    
-    while not done and step_count < max_steps:
-        
-        # Get action from policy using TensorDict format
-        with torch.no_grad():
-            action_td = policy(td.to(device))
-        
-        # Step environment
-        td = render_env.step(action_td)
-        
-        done = td["next", "terminated"].item() or td["next", "truncated"].item()
-        img = render_env.render()
-        imgs.append(img)
-        step_count += 1
-    
-    render_env.close()
-
-    # Convert frames to tensor format expected by TorchRL logger
-    # Shape: (T, H, W, C) -> (T, C, H, W)
-    frames_array = np.stack(imgs)  # Shape: (T, H, W, C)
-    frames_array = frames_array.transpose(0, 3, 1, 2)  # Shape: (T, C, H, W)
-    return frames_array
 
 
 if __name__ == "__main__":
@@ -296,14 +247,15 @@ if __name__ == "__main__":
             # it will then execute this policy at each step.
             with set_exploration_type(ExplorationType.DETERMINISTIC), torch.no_grad():
                 # execute a rollout with the trained policy
-                eval_rollout = env.rollout(1000, policy)
-                done_mask = eval_rollout["next", "done"]
-                eval_reward_mean = eval_rollout["next", "episode_reward"][done_mask].mean().item()
-                logs["eval episode reward"].append(eval_reward_mean)
+                # eval_rollout = env.rollout(10, policy)
+                # done_mask = eval_rollout["next", "done"]
+                # eval_reward_mean = eval_rollout["next", "episode_reward"][done_mask].mean().item()
+                # logs["eval episode reward"].append(eval_reward_mean)
                 
                 # Record policy video for visualization
                 try:
-                    video_frames = record_policy_video(policy, max_steps=10, seed=42, device=device)
+                    video_frames, cummulative_reward = record_policy_video(policy, max_steps=10, seed=42, device=device)
+                    logs["eval episode reward"].append(cummulative_reward)
                     logger.log_video("eval/policy_video", video_frames, step=i, fps=4)
                 except Exception as e:
                     # If video recording fails, still log other metrics
@@ -313,7 +265,7 @@ if __name__ == "__main__":
                 logger.log_scalar("eval/episode_reward_mean", logs["eval episode reward"][-1], step=i)
                 logger.log_scalar("eval/batch", i, step=i)
                 
-                del eval_rollout
+                # del eval_rollout
 
         # We're also using a learning rate scheduler. Like the gradient clipping,
         # this is a nice-to-have but nothing necessary for PPO to work.
