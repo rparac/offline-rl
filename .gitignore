@@ -158,3 +158,6 @@ cache/
 
 # Do not add debug images
 debug_env_images/
+
+# Adds tensorboard logs
+tensorboard_logs/

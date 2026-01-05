@@ -51,6 +51,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
     :param target_update_interval: update the target network every ``target_network_update_freq``
         gradient steps.
     :param target_entropy: target entropy when learning ``ent_coef`` (``ent_coef = 'auto'``)
+    :param max_grad_norm: The maximum value for the gradient clipping (0 or None to disable)
     :param stats_window_size: Window size for the rollout logging, specifying the number of episodes to average
         the reported success rate, mean episode length, and mean reward over
     :param tensorboard_log: the log location for tensorboard (if None, no logging)
@@ -99,6 +100,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
         ent_coef: Union[str, float] = "auto",
         target_update_interval: int = 1,
         target_entropy: Union[str, float] = "auto",
+        max_grad_norm: Optional[float] = 5.0,
         stats_window_size: int = 100,
         tensorboard_log: Optional[str] = None,
         policy_kwargs: Optional[dict[str, Any]] = None,
@@ -146,6 +148,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
         self.ent_coef = ent_coef
         self.target_update_interval = target_update_interval
         self.ent_coef_optimizer: Optional[th.optim.Adam] = None
+        self.max_grad_norm = max_grad_norm
         
         # SDE-related parameters (stored for API compatibility, but not implemented)
         self.use_sde = use_sde
@@ -226,9 +229,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
                 # see https://github.com/rail-berkeley/softlearning/issues/60
                 ent_coef = th.exp(self.log_ent_coef.detach())
                 assert isinstance(self.target_entropy, float)
-                # Compute entropy: H(π) = -Σ_a π(a|s) * log π(a|s)
-                entropy = -(probs * log_probs).sum(dim=1)  # [batch_size]
-                ent_coef_loss = -(self.log_ent_coef * (entropy + self.target_entropy).detach()).mean()
+                ent_coef_loss = -(self.log_ent_coef * (log_probs + self.target_entropy).detach()).mean()
                 ent_coef_losses.append(ent_coef_loss.item())
             else:
                 ent_coef = self.ent_coef_tensor
@@ -253,7 +254,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
                 # V(s') = Σ_a π(a|s') * (Q(s',a) - α * log π(a|s'))
                 next_q_values = (next_probs * (next_q_values - ent_coef * next_log_probs)).sum(dim=1, keepdim=True)  # [batch_size, 1]
                 # td error + entropy term
-                target_q_values = replay_data.rewards.unsqueeze(-1) + (1 - replay_data.dones.unsqueeze(-1)) * discounts * next_q_values
+                target_q_values = replay_data.rewards + (1 - replay_data.dones) * discounts * next_q_values
 
             # Get current Q-values estimates for each critic network
             # using action from the replay buffer
@@ -270,18 +271,23 @@ class DiscreteSAC(OffPolicyAlgorithm):
             # Optimize the critic
             self.critic.optimizer.zero_grad()
             critic_loss.backward()
+            if self.max_grad_norm is not None and self.max_grad_norm > 0:
+                th.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
             self.critic.optimizer.step()
 
             # Compute actor loss
             # L_actor = Σ_a π(a|s) * (α * log π(a|s) - Q(s,a))
             # Min over all critic networks
-            min_qf_pi, _ = th.stack(self.critic(replay_data.observations)).min(dim=0)  # [batch_size, num_actions]
+            with th.no_grad():
+                min_qf_pi, _ = th.stack(self.critic(replay_data.observations)).min(dim=0)  # [batch_size, num_actions]
             actor_loss = (probs * (ent_coef * log_probs - min_qf_pi)).sum(dim=1).mean()
             actor_losses.append(actor_loss.item())
 
             # Optimize the actor
             self.actor.optimizer.zero_grad()
             actor_loss.backward()
+            if self.max_grad_norm is not None and self.max_grad_norm > 0:
+                th.nn.utils.clip_grad_norm_(self.actor.parameters(), self.max_grad_norm)
             self.actor.optimizer.step()
 
             # Update target networks

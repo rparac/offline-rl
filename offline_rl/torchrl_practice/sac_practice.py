@@ -64,6 +64,8 @@ if __name__ == "__main__":
     tau = 0.005
     max_grad_norm = 1.0
 
+    target_entropy = 0.1
+
     env = setup_visual_minecraft_with_wrapper(device=device)
 
     actor_net = ActorNet().to(device)
@@ -115,6 +117,7 @@ if __name__ == "__main__":
         qvalue_network=qvalue,
         action_space="categorical",
         num_actions=env.action_spec.n,
+        target_entropy=target_entropy,
     )
     loss_module.make_value_estimator(gamma=gamma)
 
