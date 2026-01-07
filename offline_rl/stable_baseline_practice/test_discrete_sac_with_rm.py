@@ -6,11 +6,13 @@ import numpy as np
 import gymnasium as gym
 import torch
 import wandb
+import os
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecVideoRecorder
 from wandb.integration.sb3 import WandbCallback
 from offline_rl.stable_baseline_practice.discrete_sac import DiscreteSAC
+from offline_rl.stable_baseline_practice.utils import WandbAutoUploadCallback
 from offline_rl.torchrl_practice.env_util import setup_visual_minecraft
 
 
@@ -36,6 +38,7 @@ TAU = 0.005
 # In SB3 with VecEnv, each "step" produces NUM_ENVS transitions, so:
 # transitions_per_update = TRAIN_FREQ[0] * NUM_ENVS
 TRAIN_FREQ = (1000 // NUM_ENVS, "step")
+RECORD_VIDEO_FREQ = 1000
 GRADIENT_STEPS = 10  # number of gradient steps per update
 TARGET_UPDATE_INTERVAL = 1
 TARGET_ENTROPY = 0.1
@@ -60,7 +63,6 @@ SEED = 42
 # ============================================================================
 
 
-
 def make_env(rank: int, seed: int = 0):
     """
     Utility function for multiprocessed env.
@@ -83,6 +85,17 @@ def main():
     print("Creating VisualMinecraft environment...")
     
     vec_env = SubprocVecEnv([make_env(i, seed=SEED) for i in range(NUM_ENVS)])
+
+    video_folder = f"{TENSORBOARD_LOG_DIR}/videos/"
+    # Record video only from environment 0 (first environment) while keeping all 8 parallel
+    vec_env = VecVideoRecorder(
+        vec_env, 
+        video_folder,
+        record_video_trigger=lambda x: x % RECORD_VIDEO_FREQ == 0,
+        video_length=20,
+        name_prefix="rl-video",
+    )
+
     print(f"Action space: {vec_env.action_space} (n={vec_env.action_space.n})")
     print(f"Observation space: {vec_env.observation_space}")
     print()
@@ -106,7 +119,7 @@ def main():
             "total_timesteps": TOTAL_TIMESTEPS,
         },
         sync_tensorboard=True,  # Sync tensorboard logs to wandb
-        monitor_gym=True,
+        monitor_gym=False, # Doesn't work with new versions of Gymnasium
     )
     
     # Define metrics for wandb
@@ -143,13 +156,18 @@ def main():
     print("✓ Initialized")
     print()
     
-    # Create wandb callback
-    wandb_callback = WandbCallback(
-        # gradient_save_freq=1000,
-        # model_save_path=f"models/{wandb.run.id}",
-        verbose=2,
-    )
-    
+    wandb_callback = [
+        WandbCallback(
+            # gradient_save_freq=1000,
+            # model_save_path=f"models/{wandb.run.id}",
+            verbose=2,
+        ),
+        WandbAutoUploadCallback(
+            video_folder=video_folder,
+            check_freq=RECORD_VIDEO_FREQ,
+            verbose=2,
+        )
+    ]
     # Use learn() with a small number of steps to properly initialize everything
     # This ensures the logger is set up correctly
     model.learn(total_timesteps=TOTAL_TIMESTEPS, callback=wandb_callback)

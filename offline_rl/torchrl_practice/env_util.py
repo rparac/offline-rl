@@ -40,6 +40,8 @@ def setup_visual_minecraft(image_env: bool = False, use_dfa_state: bool = False)
         kwargs["random_start"] = True
     if use_dfa_state:
         kwargs["use_dfa_state"] = True
+        items = ["pickaxe", "lava", "door", "gem", "empty"]
+        kwargs["formula"] = "F(c0 & F(c1))", 5, "task3: seq_visit({0}, {1})".format(*items)
     _env = gym.make(
         env_id,
         **kwargs
