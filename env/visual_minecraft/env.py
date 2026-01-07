@@ -1,5 +1,6 @@
 # TODO: acknowledge Italian people
 # TODO: if this will be used, it needs cleaning up. For example, it should not normalize things
+# TODO: it would be better if RM was a wrapper
 
 
 """
@@ -49,7 +50,6 @@ class GridWorldEnv(gym.Env):
         self._LAVA = f"{dir_prefix}/lava.jpg"
 
         self._train = train
-        self.use_dfa_state = use_dfa_state
         self.max_num_steps = 50
         self.curr_step = 0
         self.random_start = random_start
@@ -163,9 +163,15 @@ class GridWorldEnv(gym.Env):
                     dtype=np.uint8,
                 )
 
-
         elif state_type == "symbolic":
             self.observation_space = spaces.MultiDiscrete([size, size])
+
+        self.use_dfa_state = use_dfa_state
+        if use_dfa_state:
+            self.observation_space = gym.spaces.Dict({
+                "image": self.observation_space,
+                "dfa_state": gym.spaces.Discrete(self.automaton.num_of_states),
+            })
 
     def _save_images(self, all_images):
         location = "dataset/visual_minecraft_new"
@@ -208,16 +214,18 @@ class GridWorldEnv(gym.Env):
             self._render_frame()
         if self.state_type == "symbolic":
             if self.use_dfa_state:
-                observation = np.array(list(self._agent_location) + [self.curr_automaton_state])
+                observation = {
+                    "image": np.array(list(self._agent_location)),
+                    "dfa_state": self.curr_automaton_state,
+                }
             else:
                 observation = np.array(list(self._agent_location))
         elif self.state_type == "image":
             if self.use_dfa_state:
-                one_hot_dfa_state = [0 for _ in range(self.automaton.num_of_states)]
-                one_hot_dfa_state[self.curr_automaton_state] = 1
-                # print("one_hot_dfa_state: ", one_hot_dfa_state)
-                observation = [np.array(one_hot_dfa_state), self.image_locations[
-                    self._agent_location[0], self._agent_location[1]]]  # 1 FULL Img, 0 Just the square the robot is in
+                observation = {
+                    "dfa_state": self.curr_automaton_state,
+                    "image": self.image_locations[self._agent_location[0], self._agent_location[1]],
+                }
             else:
                 observation = self.image_locations[self._agent_location[0], self._agent_location[1]]
         else:
@@ -282,16 +290,18 @@ class GridWorldEnv(gym.Env):
 
         if self.state_type == "symbolic":
             if self.use_dfa_state:
-                observation = np.array(list(self._agent_location) + [self.curr_automaton_state])
+                observation = {
+                    "image": np.array(list(self._agent_location)),
+                    "dfa_state": self.curr_automaton_state,
+                }
             else:
                 observation = np.array(list(self._agent_location))
         elif self.state_type == "image":
             if self.use_dfa_state:
-                one_hot_dfa_state = [0 for _ in range(self.automaton.num_of_states)]
-                one_hot_dfa_state[self.curr_automaton_state] = 1
-                # print("one_hot_dfa_state: ", one_hot_dfa_state)
-                observation = [np.array(one_hot_dfa_state),
-                               self.image_locations[self._agent_location[0], self._agent_location[1]]]
+                observation = {
+                    "dfa_state": self.curr_automaton_state,
+                    "image": self.image_locations[self._agent_location[0], self._agent_location[1]],
+                }
             else:
                 observation = self.image_locations[self._agent_location[0], self._agent_location[1]]
 

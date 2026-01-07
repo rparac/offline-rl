@@ -7,7 +7,6 @@ from torchrl.envs.libs.gym import GymEnv
 from torchrl.envs import DTypeCastTransform, GymWrapper, RewardSum, StepCounter, TransformedEnv, step_mdp
 import numpy as np
 
-from offline_rl.stable_baseline_practice.frozen_lake_utils import FrozenLakeObsWrapper
 
 from env.visual_minecraft.env import GridWorldEnv
 # Optional dependency (only used by `setup_simple_ltl_env`).
@@ -32,13 +31,15 @@ def _get_args_kwargs_visual_minecraft():
     }
     return kwargs
 
-def setup_visual_minecraft(image_env: bool = False):
+def setup_visual_minecraft(image_env: bool = False, use_dfa_state: bool = False):
     env_id = "VisualMinecraft-v0"
     kwargs = _get_args_kwargs_visual_minecraft()
     if image_env:
         kwargs["state_type"] = "image"
         kwargs["normalize_env"] = False
         kwargs["random_start"] = True
+    if use_dfa_state:
+        kwargs["use_dfa_state"] = True
     _env = gym.make(
         env_id,
         **kwargs
@@ -81,31 +82,6 @@ def setup_frozen_lake_with_wrapper(device: torch.device = torch.device("cpu")):
     )
 
     return _env
-
-
-def setup_frozen_lake_with_obs_wrapper(
-    device: torch.device = torch.device("cpu"),
-    map_name: str = "4x4",
-    is_slippery: bool = False,
-    categorical_action_encoding: bool = True,
-):
-    """FrozenLake TorchRL env that uses a Gymnasium ObservationWrapper.
-
-    Use this when you want to change the observation returned by Gymnasium
-    (e.g., discrete index -> (row, col) via `FrozenLakeObsWrapper`) and then
-    train with TorchRL.
-    """
-    gym_env = gym.make(
-        "FrozenLake-v1",
-        map_name=map_name,
-        is_slippery=is_slippery,
-    )
-    gym_env = FrozenLakeObsWrapper(gym_env, map_name=map_name)
-
-    env = GymWrapper(gym_env, device=device, categorical_action_encoding=categorical_action_encoding)
-    env = env.append_transform(RewardSum())
-    env = env.append_transform(StepCounter())
-    return env
 
 
 def setup_pendulum_with_wrapper(device: torch.device = torch.device("cpu")):
