@@ -1,5 +1,5 @@
 """
-Simplified test script - just tests the training step to quickly identify errors.
+Seems to be working for images just to reach one object
 """
 
 import numpy as np
@@ -46,9 +46,7 @@ MAX_GRAD_NORM = 1.0
 # IMPORTANT: TorchRL defaults to num_qvalue_nets=2 (double-Q learning) even when
 # you pass a single Q-network - it internally duplicates it!
 POLICY_KWARGS = {
-    "net_arch": [16],
-    "n_critics": 2,  # TorchRL defaults to 2 Q-networks (double-Q learning)
-    "activation_fn": torch.nn.Identity,
+    # "normalized_image": True,
 }
 
 # Logging
@@ -62,14 +60,6 @@ SEED = 42
 # ============================================================================
 
 
-class ToBoxObs(gym.ObservationWrapper):
-    def __init__(self, env):
-        super().__init__(env)
-        self.observation_space = gym.spaces.Box(low=0, high=3, shape=(2,), dtype=np.float32)
-
-    def observation(self, observation):
-        return np.array([observation[0], observation[1]], dtype=np.float32)
-
 
 def make_env(rank: int, seed: int = 0):
     """
@@ -81,8 +71,7 @@ def make_env(rank: int, seed: int = 0):
     :param rank: index of the subprocess
     """
     def _init():
-        env = setup_visual_minecraft()
-        env = ToBoxObs(env)
+        env = setup_visual_minecraft(image_env=True)
         env.reset(seed=seed + rank)
         # Wrap with Monitor to enable rollout metrics logging
         env = Monitor(env)
@@ -128,7 +117,7 @@ def main():
     
     print("Initializing DiscreteSAC...")
     model = DiscreteSAC(
-        policy="DiscreteMlpPolicy",
+        policy="DiscreteCnnPolicy",
         policy_kwargs=POLICY_KWARGS,
         env=vec_env,
         learning_rate=LEARNING_RATE,
@@ -141,15 +130,15 @@ def main():
         critic_loss_type="smooth_l1",
         train_freq=TRAIN_FREQ,
         gradient_steps=GRADIENT_STEPS,
-        # ent_coef="auto_0.1", # 0.05,
+        ent_coef="auto_0.1", # 0.05,
         target_update_interval=TARGET_UPDATE_INTERVAL,
         max_grad_norm=MAX_GRAD_NORM,
         verbose=1,
         seed=SEED,
         tensorboard_log=TENSORBOARD_LOG_DIR,
-        replay_buffer_kwargs={
-            "handle_timeout_termination": False,
-        }
+        # replay_buffer_kwargs={
+        #     "handle_timeout_termination": False,
+        # }
     )
     print("✓ Initialized")
     print()

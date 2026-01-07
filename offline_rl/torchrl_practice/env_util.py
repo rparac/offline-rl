@@ -18,63 +18,6 @@ except Exception:  # pragma: no cover
 # from env.simple_ltl_env import SimpleLTLEnv
 
 
-def record_policy_video(policy, max_steps=10, seed=42, device=None):
-    """
-    Record a policy rollout as a video and return frames for logging.
-    
-    Args:
-        policy: The policy to evaluate
-        max_steps: Maximum number of steps in the rollout
-        seed: Random seed for reproducibility
-        device: Device to run policy on
-        
-    Returns:
-        frames: Tensor of shape (T, C, H, W) representing video frames
-    """
-    
-    # Create a separate environment for rendering with rgb_array mode
-    render_env = setup_visual_minecraft_with_wrapper(device=device)
-
-    td = render_env.reset()
-
-    # Img is a numpy array of shape (512, 512, 3)
-    imgs = []
-    img = render_env.render()
-    imgs.append(img)
-    
-    done = False
-    step_count = 0
-
-    cumulative_reward = 0.0
-    
-    while not done and step_count < max_steps:
-        
-        # Get action from policy using TensorDict format
-        with torch.no_grad():
-            td = policy(td.to(device))
-        
-        # Step environment
-        td = render_env.step(td)
-
-        # TorchRL convention: the post-step observation/reward/done live under the "next" key.
-        # Move ("next", ...) entries to the root so the next policy call sees the updated state.
-        cumulative_reward += float(td["next", "reward"].item())
-        done = bool(td["next", "terminated"].item() or td["next", "truncated"].item())
-        img = render_env.render()
-        imgs.append(img)
-        step_count += 1
-
-        td = step_mdp(td, keep_other=False)
-    
-    render_env.close()
-
-    # Convert frames to tensor format expected by TorchRL logger
-    # Shape: (T, H, W, C) -> (T, C, H, W)
-    frames_array = np.stack(imgs)  # Shape: (T, H, W, C)
-    frames_array = frames_array.transpose(0, 3, 1, 2)  # Shape: (T, C, H, W)
-    return frames_array, cumulative_reward
-
-
 def _get_args_kwargs_visual_minecraft():
     items = ["pickaxe", "lava", "door", "gem", "empty"]
     formula = "(F c0)", 5, "task0: visit({1})".format(*items)
@@ -89,11 +32,16 @@ def _get_args_kwargs_visual_minecraft():
     }
     return kwargs
 
-def setup_visual_minecraft():
+def setup_visual_minecraft(image_env: bool = False):
     env_id = "VisualMinecraft-v0"
+    kwargs = _get_args_kwargs_visual_minecraft()
+    if image_env:
+        kwargs["state_type"] = "image"
+        kwargs["normalize_env"] = False
+        kwargs["random_start"] = True
     _env = gym.make(
         env_id,
-        **_get_args_kwargs_visual_minecraft()
+        **kwargs
     )
     return _env
 
@@ -160,6 +108,23 @@ def setup_frozen_lake_with_obs_wrapper(
     return env
 
 
+def setup_pendulum_with_wrapper(device: torch.device = torch.device("cpu")):
+    env_id = "Pendulum-v1"
+    _env = GymEnv(
+        env_id,
+        device=device,
+        render_mode="rgb_array",
+    )
+    # Used for logging purposes
+    _env = _env.append_transform(
+        RewardSum()
+    )
+    _env = _env.append_transform(
+        StepCounter()
+    )
+    return _env
+
+
 def setup_visual_minecraft_with_wrapper(device: torch.device = torch.device("cpu")):
     env_id = "VisualMinecraft-v0"
     categorical_action_encoding = True
@@ -199,3 +164,60 @@ def setup_simple_ltl_env():
     torchrl_env = GymWrapper(_env)
 
     return torchrl_env
+
+def record_policy_video(policy, max_steps=10, seed=42, device=None, render_env_fn=setup_visual_minecraft_with_wrapper):
+    """
+    Record a policy rollout as a video and return frames for logging.
+    
+    Args:
+        policy: The policy to evaluate
+        max_steps: Maximum number of steps in the rollout
+        seed: Random seed for reproducibility
+        device: Device to run policy on
+        
+    Returns:
+        frames: Tensor of shape (T, C, H, W) representing video frames
+    """
+    
+    render_env = render_env_fn(device=device)
+
+    td = render_env.reset()
+
+    # Img is a numpy array of shape (512, 512, 3)
+    imgs = []
+    img = render_env.render()
+    imgs.append(img)
+    
+    done = False
+    step_count = 0
+
+    cumulative_reward = 0.0
+    
+    while not done and step_count < max_steps:
+        device = td.device
+        
+        # Get action from policy using TensorDict format
+        with torch.no_grad():
+            td = policy(td.to(device))
+        
+        # Step environment
+        td = render_env.step(td)
+
+        # TorchRL convention: the post-step observation/reward/done live under the "next" key.
+        # Move ("next", ...) entries to the root so the next policy call sees the updated state.
+        cumulative_reward += float(td["next", "reward"].item())
+        done = bool(td["next", "terminated"].item() or td["next", "truncated"].item())
+        img = render_env.render()
+        imgs.append(img)
+        step_count += 1
+
+        td = step_mdp(td, keep_other=False)
+    
+    render_env.close()
+
+    # Convert frames to tensor format expected by TorchRL logger
+    # Shape: (T, H, W, C) -> (T, C, H, W)
+    frames_array = np.stack(imgs)  # Shape: (T, H, W, C)
+    frames_array = frames_array.transpose(0, 3, 1, 2)  # Shape: (T, C, H, W)
+    return frames_array, cumulative_reward
+

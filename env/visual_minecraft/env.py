@@ -1,4 +1,6 @@
 # TODO: acknowledge Italian people
+# TODO: if this will be used, it needs cleaning up. For example, it should not normalize things
+
 
 """
 Propositions (to implement):
@@ -36,7 +38,7 @@ transforms = torchvision.transforms.Compose([
 class GridWorldEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    def __init__(self, formula, render_mode="human", state_type="symbolic", use_dfa_state=True, train=True, size=4, random_start=False):
+    def __init__(self, formula, render_mode="human", state_type="symbolic", use_dfa_state=True, train=True, size=4, random_start=False, normalize_env=True):
         self.dictionary_symbols = ['P', 'L', 'D', 'G', 'E']
         vis_minecraft_folder = Path(__file__).parent.absolute()
         dir_prefix = f"{vis_minecraft_folder}/imgs"
@@ -79,7 +81,7 @@ class GridWorldEnv(gym.Env):
             self.state_space_size = 2
         elif state_type == "image":
             # self.state_space_size = (3, 64, 64)
-            self.state_space_size = (3, 224, 224)
+            self.state_space_size = (3, 224, 224) if normalize_env else (224, 224, 3)
         # 0 = GO_DOWN
         # 1 = GO_RIGHT
         # 2 = GO_UP
@@ -116,11 +118,19 @@ class GridWorldEnv(gym.Env):
                     else:
                         obss = self._render_frame()
 
-                    obss = torch.tensor(obss.copy(), dtype=torch.float64) / 255
-                    obss = torch.permute(obss, (2, 0, 1))
-                    obss = resize(obss)
-                    obss = normalize(obss)
-                    obss = obss.cpu().numpy()
+                    if normalize_env:
+                        obss = torch.tensor(obss.copy(), dtype=torch.float64) / 255
+                        obss = torch.permute(obss, (2, 0, 1))
+                        obss = resize(obss)
+                        obss = normalize(obss)
+                        obss = obss.cpu().numpy()
+                    else:
+                        # Resize numpy image to (224, 224, 3) using PIL
+                        img = Image.fromarray(obss)
+                        img = img.resize((224, 224), resample=Image.BILINEAR)
+                        obss = np.array(img)
+                        assert obss.dtype == np.uint8
+                        assert obss.shape == (224, 224, 3)
                     self.image_locations[r, c] = obss
             # normalization
             all_images = list(self.image_locations.values())
@@ -138,12 +148,22 @@ class GridWorldEnv(gym.Env):
             # for k in self.image_locations.keys():
             #     self.image_locations[k] = np.transpose(self.image_locations[k], (1, 2, 0))
 
-            self.observation_space = Box(
-                low=-10.0, # loose values to account for standardized values
-                high=10.0,
-                shape=self.state_space_size,
-                dtype=np.float64,
-            )
+            if normalize_env:
+                self.observation_space = Box(
+                    low=-10.0, # loose values to account for standardized values
+                    high=10.0,
+                    shape=self.state_space_size,
+                    dtype=np.float64,
+                )
+            else:
+                self.observation_space = Box(
+                    low=0,
+                    high=255,
+                    shape=self.state_space_size,
+                    dtype=np.uint8,
+                )
+
+
         elif state_type == "symbolic":
             self.observation_space = spaces.MultiDiscrete([size, size])
 

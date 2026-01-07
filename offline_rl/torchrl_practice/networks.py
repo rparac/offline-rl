@@ -28,6 +28,42 @@ class QNet(nn.Module):
         x = self.to_act(x)
         return x
 
+class QNet2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.obs_embed = nn.Linear(3, 16)
+        self.to_val = nn.Linear(16, 1)
+
+    def forward(self, obs):
+        x = self.obs_embed(obs)
+        x = F.relu(x)
+        x = self.to_val(x)
+        return x
+
+class ActorNet2(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.lin1 = nn.Linear(3, 16)
+        self.lin2 = nn.Linear(16, 2)
+
+    def forward(self, obs):
+        squeezed = False
+        if obs.dim() == 1:
+            # non-batched input
+            obs = obs.unsqueeze(0)
+            squeezed = True
+
+
+        # x = torch.cat([obs[:, 0], obs[:, 1]], dim=-1).float()
+        x = self.lin1(obs)
+        x = F.relu(x)
+        x = self.lin2(x)
+
+        if squeezed:
+            x = x.squeeze(0)
+
+        return x
+
 class ActorNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -49,5 +85,7 @@ class ActorNet(nn.Module):
 
         if squeezed:
             x = x.squeeze(0)
+
+        x = F.log_softmax(x, dim=-1)
 
         return x

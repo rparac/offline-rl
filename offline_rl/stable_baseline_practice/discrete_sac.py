@@ -2,6 +2,7 @@ from typing import Any, ClassVar, Optional, TypeVar, Union
 
 import numpy as np
 import torch as th
+import warnings
 from gymnasium import spaces
 from torch.nn import functional as F
 
@@ -98,6 +99,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
         optimize_memory_usage: bool = False,
         n_steps: int = 1,
         ent_coef: Union[str, float] = "auto",
+        critic_loss_type: str = "mse",
         target_update_interval: int = 1,
         target_entropy: Union[str, float] = "auto",
         max_grad_norm: Optional[float] = 5.0,
@@ -146,6 +148,7 @@ class DiscreteSAC(OffPolicyAlgorithm):
         # Entropy coefficient / Entropy temperature
         # Inverse of the reward scale
         self.ent_coef = ent_coef
+        self.critic_loss_type = critic_loss_type
         self.target_update_interval = target_update_interval
         self.ent_coef_optimizer: Optional[th.optim.Adam] = None
         self.max_grad_norm = max_grad_norm
@@ -166,8 +169,9 @@ class DiscreteSAC(OffPolicyAlgorithm):
         self.batch_norm_stats_target = get_parameters_by_name(self.critic_target, ["running_"])
         # Target entropy is used when learning the entropy coefficient
         if self.target_entropy == "auto":
-            # automatically set target entropy if needed
-            self.target_entropy = float(-np.log(self.env.action_space.n))
+            # Discrete SAC: target entropy is a positive entropy value, near maximum entropy log(|A|).
+            # 0.98 is the default value in torchRL implementation.
+            self.target_entropy = float(np.log(self.env.action_space.n)) * 0.98
         else:
             # Force conversion
             # this will also throw an error for unexpected string
@@ -210,7 +214,17 @@ class DiscreteSAC(OffPolicyAlgorithm):
         self._update_learning_rate(optimizers)
 
         ent_coef_losses, ent_coefs = [], []
+        entropies = []
         actor_losses, critic_losses = [], []
+        q_min_pi_means = []
+        target_q_means = []
+        reward_means = []
+        done_means = []
+        discount_means = []
+        discount_maxes = []
+        next_v_means = []
+        next_q_expect_means = []
+        next_entropy_bonus_means = []
 
         for gradient_step in range(gradient_steps):
             # Sample replay buffer
@@ -222,6 +236,19 @@ class DiscreteSAC(OffPolicyAlgorithm):
             log_probs = self.actor.action_log_prob(replay_data.observations)  # [batch_size, num_actions]
             probs = log_probs.exp()  # [batch_size, num_actions]
 
+            # Compute entropy for logging
+            with th.no_grad():
+                entropy_per_sample = -(probs * log_probs).sum(dim=1, keepdim=True)  # [batch_size, 1]
+                entropies.append(entropy_per_sample.mean().item())
+                reward_means.append(replay_data.rewards.mean().item())
+                done_means.append(replay_data.dones.float().mean().item())
+                if isinstance(discounts, th.Tensor):
+                    discount_means.append(discounts.mean().item())
+                    discount_maxes.append(discounts.max().item())
+                else:
+                    discount_means.append(float(discounts))
+                    discount_maxes.append(float(discounts))
+
             ent_coef_loss = None
             if self.ent_coef_optimizer is not None and self.log_ent_coef is not None:
                 # Important: detach the variable from the graph
@@ -229,7 +256,12 @@ class DiscreteSAC(OffPolicyAlgorithm):
                 # see https://github.com/rail-berkeley/softlearning/issues/60
                 ent_coef = th.exp(self.log_ent_coef.detach())
                 assert isinstance(self.target_entropy, float)
-                ent_coef_loss = -(self.log_ent_coef * (log_probs + self.target_entropy).detach()).mean()
+
+                # Match TorchRL DiscreteSACLoss: use expected log-prob E[log pi(a|s)] (<= 0)
+                # and a (typically positive) target entropy value, minimizing:
+                #   loss_alpha = -log_alpha * (E[log_pi] + target_entropy)
+                expected_log_prob = (probs * log_probs).sum(dim=1)  # [batch]
+                ent_coef_loss = -(self.log_ent_coef * (expected_log_prob + self.target_entropy).detach()).mean()
                 ent_coef_losses.append(ent_coef_loss.item())
             else:
                 ent_coef = self.ent_coef_tensor
@@ -252,9 +284,15 @@ class DiscreteSAC(OffPolicyAlgorithm):
 
                 next_q_values, _ = th.stack(next_q_values_all).min(dim=0)  # [batch_size, num_actions]
                 # V(s') = Σ_a π(a|s') * (Q(s',a) - α * log π(a|s'))
-                next_q_values = (next_probs * (next_q_values - ent_coef * next_log_probs)).sum(dim=1, keepdim=True)  # [batch_size, 1]
+                next_entropy = -(next_probs * next_log_probs).sum(dim=1, keepdim=True)  # [batch_size, 1]
+                next_q_expect = (next_probs * next_q_values).sum(dim=1, keepdim=True)  # [batch_size, 1]
+                next_q_values = next_q_expect + ent_coef * next_entropy  # [batch_size, 1]
                 # td error + entropy term
                 target_q_values = replay_data.rewards + (1 - replay_data.dones) * discounts * next_q_values
+                target_q_means.append(target_q_values.mean().item())
+                next_v_means.append(next_q_values.mean().item())
+                next_q_expect_means.append(next_q_expect.mean().item())
+                next_entropy_bonus_means.append((ent_coef * next_entropy).mean().item())
 
             # Get current Q-values estimates for each critic network
             # using action from the replay buffer
@@ -263,8 +301,24 @@ class DiscreteSAC(OffPolicyAlgorithm):
                 y = current_q.gather(dim=1, index=replay_data.actions)
                 current_q_values.append(y)
 
+            # Compute actor loss (use the critic *before* it is updated this gradient step).
+            # This matches the common "compute all losses, then apply optimizer steps" pattern
+            # and is closer to TorchRL's DiscreteSACLoss behavior.
+            # L_actor = Σ_a π(a|s) * (α * log π(a|s) - Q(s,a))
+            # Min over all critic networks
+            with th.no_grad():
+                min_qf_pi, _ = th.stack(self.critic(replay_data.observations)).min(dim=0)  # [batch_size, num_actions]
+            q_min_pi_means.append(min_qf_pi.mean().item())
+            actor_loss = (probs * (ent_coef * log_probs - min_qf_pi)).sum(dim=1).mean()
+            actor_losses.append(actor_loss.item())
+
             # Compute critic loss
-            critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
+            if self.critic_loss_type == "smooth_l1":
+                critic_loss = sum(F.smooth_l1_loss(current_q, target_q_values) for current_q in current_q_values)
+            elif self.critic_loss_type == "mse":
+                critic_loss = 0.5 * sum(F.mse_loss(current_q, target_q_values) for current_q in current_q_values)
+            else:
+                raise ValueError(f"Unknown critic_loss_type={self.critic_loss_type!r}. Use 'mse' or 'smooth_l1'.")
             assert isinstance(critic_loss, th.Tensor)  # for type checker
             critic_losses.append(critic_loss.item())  # type: ignore[union-attr]
 
@@ -274,14 +328,6 @@ class DiscreteSAC(OffPolicyAlgorithm):
             if self.max_grad_norm is not None and self.max_grad_norm > 0:
                 th.nn.utils.clip_grad_norm_(self.critic.parameters(), self.max_grad_norm)
             self.critic.optimizer.step()
-
-            # Compute actor loss
-            # L_actor = Σ_a π(a|s) * (α * log π(a|s) - Q(s,a))
-            # Min over all critic networks
-            with th.no_grad():
-                min_qf_pi, _ = th.stack(self.critic(replay_data.observations)).min(dim=0)  # [batch_size, num_actions]
-            actor_loss = (probs * (ent_coef * log_probs - min_qf_pi)).sum(dim=1).mean()
-            actor_losses.append(actor_loss.item())
 
             # Optimize the actor
             self.actor.optimizer.zero_grad()
@@ -300,8 +346,27 @@ class DiscreteSAC(OffPolicyAlgorithm):
 
         self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
         self.logger.record("train/ent_coef", np.mean(ent_coefs))
+        self.logger.record("train/entropy", np.mean(entropies))
         self.logger.record("train/actor_loss", np.mean(actor_losses))
         self.logger.record("train/critic_loss", np.mean(critic_losses))
+        if len(q_min_pi_means) > 0:
+            self.logger.record("debug/q_min_pi_mean", np.mean(q_min_pi_means))
+        if len(target_q_means) > 0:
+            self.logger.record("debug/target_q_mean", np.mean(target_q_means))
+        if len(reward_means) > 0:
+            self.logger.record("debug/reward_mean", np.mean(reward_means))
+        if len(done_means) > 0:
+            self.logger.record("debug/done_mean", np.mean(done_means))
+        if len(discount_means) > 0:
+            self.logger.record("debug/discount_mean", np.mean(discount_means))
+        if len(discount_maxes) > 0:
+            self.logger.record("debug/discount_max", np.mean(discount_maxes))
+        if len(next_v_means) > 0:
+            self.logger.record("debug/next_v_mean", np.mean(next_v_means))
+        if len(next_q_expect_means) > 0:
+            self.logger.record("debug/next_q_expect_mean", np.mean(next_q_expect_means))
+        if len(next_entropy_bonus_means) > 0:
+            self.logger.record("debug/next_entropy_bonus_mean", np.mean(next_entropy_bonus_means))
         if len(ent_coef_losses) > 0:
             self.logger.record("train/ent_coef_loss", np.mean(ent_coef_losses))
 
