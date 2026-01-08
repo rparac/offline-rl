@@ -49,6 +49,12 @@ class VisualMinecraftCLIPSimilarityModel(nn.Module):
         embedded_prompts = self.embed_prompts(prompts)
         self.register_buffer("_embedded_prompts", embedded_prompts)
 
+        self._prompt_keys = list(prompts_with_thresholds.keys())
+        prompt_thresholds = torch.tensor(list(prompts_with_thresholds.values()))
+        self.register_buffer("_prompt_thresholds", prompt_thresholds)
+
+
+
     @torch.inference_mode()
     def forward(self, embedded_images: torch.Tensor) -> torch.Tensor:
         # We do not need to compute full cosine similarity as the norm is 1 in CLIP
@@ -73,6 +79,22 @@ class VisualMinecraftCLIPSimilarityModel(nn.Module):
 
     def embed_images(self, x):
         return self.embed_module.forward(x)
+
+    def labels_from_similarities(self, similarities: torch.Tensor) -> torch.Tensor:
+        # similarities is a tensor of shape (batch_size, num_prompts)
+        labels = similarities < self._prompt_thresholds.unsqueeze(0)
+        return labels
+
+    def compute_labels(self, frames: torch.Tensor) -> torch.Tensor:
+        img_embedding = self.embed_images(frames)
+        similarities = self(img_embedding)
+
+        labels = self.labels_from_similarities(similarities)
+        return labels
+
+
+    def get_prompt_keys(self) -> List[str]:
+        return self._prompt_keys
 
 
 def load_visual_minecraft_similarity_model(
