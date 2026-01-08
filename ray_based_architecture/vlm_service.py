@@ -27,9 +27,9 @@ def _initialize_similarity_model():
 
 # Define the deployment (Consumer)
 @serve.deployment(
-    num_replicas=3,          # Use 3 GPUs (Worker Pool)
+    num_replicas=3,
     ray_actor_options={"num_gpus": 1}, 
-    max_ongoing_requests=500 # How many requests can sit in the queue per replica
+    max_ongoing_requests=500  # Large queue to keep GPU fed
 )
 class VLMService:
     def __init__(self):
@@ -57,8 +57,8 @@ class VLMService:
     # Batch of images is a list of observations (type is observation space)
     # Enable automatic batching
     @serve.batch(
-        max_batch_size=128,  # Increased batch size for better GPU utilization
-        batch_wait_timeout_s=0.01  # Don't wait too long to fill batches
+        max_batch_size=128,
+        batch_wait_timeout_s=0.05  # Short timeout to keep GPU busy
     )
     async def compute_reward(self, batch_of_images) -> torch.Tensor:
         """
@@ -67,10 +67,19 @@ class VLMService:
         batch_size = len(batch_of_images)
         start_time = time.time()
         
-        # Run inference on the whole batch
+        # Optimized data transfer: Convert to tensor more efficiently
         images_only = [obs['image'] for obs in batch_of_images]
-        img_tensor = torch.stack([torch.from_numpy(image) for image in images_only])
-        img_tensor = img_tensor.to(self.device, non_blocking=True).half()
+        
+        # Stack numpy arrays into a single numpy array first (faster)
+        img_numpy = np.stack(images_only, axis=0)
+        
+        # Convert to torch tensor and transfer to GPU in one go
+        # Using pin_memory=True for faster CPU->GPU transfer
+        img_tensor = torch.from_numpy(img_numpy).to(
+            self.device, 
+            dtype=torch.float16,  # Convert to half directly
+            non_blocking=True
+        )
 
         with torch.no_grad():
             labels = self.similarity_model.compute_labels(img_tensor)
@@ -88,13 +97,15 @@ class VLMService:
         self.recent_inference_times.append(inference_time_ms)
         
         if self.batch_count % 50 == 0:
-            avg_batch_size = np.mean(self.recent_batch_sizes[-50:])
-            avg_inference_time = np.mean(self.recent_inference_times[-50:])
+            avg_batch_size = np.mean(self.recent_batch_sizes)
+            avg_inference_time = np.mean(self.recent_inference_times)
             avg_throughput = avg_batch_size / (avg_inference_time / 1000)
             print(f"[GPU {self.device}] Batches: {self.batch_count} | "
                   f"Avg batch size: {avg_batch_size:.1f} | "
                   f"Avg inference time: {avg_inference_time:.1f}ms | "
                   f"Throughput: {avg_throughput:.1f} img/s")
+            self.recent_batch_sizes = []
+            self.recent_inference_times = []
         
         return labels.cpu()
 

@@ -1,8 +1,16 @@
+"""
+Script for optimizing VLM usage
+"""
+
 import gymnasium as gym
 import ray
 from ray import serve
 import time
 import numpy as np
+import os
+
+# Set environment variable BEFORE Ray starts
+os.environ["RAY_SERVE_QUEUE_LENGTH_RESPONSE_DEADLINE_S"] = "0.5"
 
 from env.visual_minecraft.fixed_len_env import GridWorldEnv
 from ray_based_architecture.vlm_service import VLMService
@@ -31,7 +39,9 @@ if ray.is_initialized():
 
 ray.init(
     runtime_env={
-        "env_vars": {"RAY_DEBUG": "1"}
+        "env_vars": {
+            "RAY_DEBUG": "1"
+        }
     }
 )
 
@@ -42,7 +52,7 @@ obs, info = env.reset()
 
 # Use a sliding window approach to keep the pipeline full
 num_tests = 100000
-window_size = 500  # Keep 500 requests in flight at a time
+window_size = 5000  # Large window to saturate 3 GPUs (1000 per GPU)
 pending_refs = []
 
 start_time = time.time()
