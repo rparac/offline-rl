@@ -161,3 +161,6 @@ debug_env_images/
 
 # Adds tensorboard logs
 tensorboard_logs/
+
+# Removes runs from git
+runs/
