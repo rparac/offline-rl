@@ -37,8 +37,8 @@ command:
   - --no-capture-video
   # Fix everything else here (edit as needed for your setup):
   - --env-id=VisualMinecraft-v0
-  - --total-timesteps=500000
-  - --buffer-size=100000
+  - --total-timesteps=100000
+  - --buffer-size=10000
   - --gamma=0.99
   - --tau=0.005
   - --learning-starts=20000

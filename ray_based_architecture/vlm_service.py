@@ -32,10 +32,10 @@ def _initialize_similarity_model():
     max_ongoing_requests=500  # Large queue to keep GPU fed
 )
 class VLMService:
-    def __init__(self):
+    def __init__(self, replay_buffer_name: str, replay_buffer_namespace: str):
         # Ray sets CUDA_VISIBLE_DEVICES, so "cuda" points to the assigned GPU
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Loading VLM Model on {self.device}...")
+        print(f"Loading VLM Model on {self.device}...", flush=True)
         self.similarity_model = _initialize_similarity_model()
         self.similarity_model.to(self.device)
         
@@ -53,7 +53,87 @@ class VLMService:
         self.batch_count = 0
         self.recent_batch_sizes = []
         self.recent_inference_times = []
+
+        # Avoid passing ActorHandles into Serve replicas (can hit deserialization bugs).
+        # Instead, look it up by (name, namespace) from inside the replica process.
+        self.replay_buffer_handle = ray.get_actor(replay_buffer_name, namespace=replay_buffer_namespace)
+
+    # One request == one transition. Ray Serve batches requests across producers.
+    @serve.batch(
+        max_batch_size=128,
+        batch_wait_timeout_s=0.05  # Short timeout to keep GPU busy
+    )
+    async def label_reward(self, observations, actions, next_observations, terminateds, truncateds):
+        """
+        Args are lists (one per request) due to Ray Serve batching:
+        - observations: list[Any]
+        - actions: list[Any]
+        - next_observations: list[Any]
+        - terminateds: list[bool]
+        - truncateds: list[bool]
+        """
+        batch_size = len(next_observations)
+        start_time = time.time()
+        
+        # Optimized data transfer: Convert to tensor more efficiently
+        images_only = [obs["image"] for obs in next_observations]
+        
+        # Stack numpy arrays into a single numpy array first (faster)
+        img_numpy = np.stack(images_only, axis=0)
+        
+        # Convert to torch tensor and transfer to GPU in one go
+        # Using pin_memory=True for faster CPU->GPU transfer
+        img_tensor = torch.from_numpy(img_numpy).to(
+            self.device, 
+            dtype=torch.float16,  # Convert to half directly
+            non_blocking=True
+        )
+
+        with torch.no_grad():
+            labels = self.similarity_model.compute_labels(img_tensor)
+
+        # Ensure we pass numpy arrays into the replay buffer actor.
+        rewards = labels[:, 0].detach().cpu().numpy()
+        
+        # Calculate and record VLM-specific metrics
+        inference_time_ms = (time.time() - start_time) * 1000
+        throughput = batch_size / (inference_time_ms / 1000) if inference_time_ms > 0 else 0
+        
+        self.batch_size_gauge.set(batch_size)
+        self.throughput_gauge.set(throughput)
+        
+        # Console logging (every 50 batches)
+        self.batch_count += 1
+        self.recent_batch_sizes.append(batch_size)
+        self.recent_inference_times.append(inference_time_ms)
+        
+        if self.batch_count % 50 == 0:
+            avg_batch_size = np.mean(self.recent_batch_sizes)
+            avg_inference_time = np.mean(self.recent_inference_times)
+            avg_throughput = avg_batch_size / (avg_inference_time / 1000)
+            print(f"[GPU {self.device}] Batches: {self.batch_count} | "
+                  f"Avg batch size: {avg_batch_size:.1f} | "
+                  f"Avg inference time: {avg_inference_time:.1f}ms | "
+                  f"Throughput: {avg_throughput:.1f} img/s")
+            self.recent_batch_sizes = []
+            self.recent_inference_times = []
+        
+        # Fire-and-forget: write the whole batch into the replay buffer.
+        # NOTE: Serve expects one return value per request; we return rewards per request below.
+        self.replay_buffer_handle.add_batch.remote(
+            observations=np.array(observations, dtype=object),
+            next_observations=np.array(next_observations, dtype=object),
+            actions=np.array(actions, dtype=object),
+            rewards=rewards,
+            terminateds=np.array(terminateds, dtype=np.bool_),
+            truncateds=np.array(truncateds, dtype=np.bool_),
+        )
+
+        # One return per original request
+        return list(rewards)
+
     
+    # TODO: Delete this function if it is unused
     # Batch of images is a list of observations (type is observation space)
     # Enable automatic batching
     @serve.batch(

@@ -25,6 +25,13 @@ class SACReplayBuffer:
         if not batches:
             return
 
+        assert "observations" in batches, "Observations must be present in the batch"
+        assert "next_observations" in batches, "Next observations must be present in the batch"
+        assert "actions" in batches, "Actions must be present in the batch"
+        assert "rewards" in batches, "Rewards must be present in the batch"
+        assert "terminateds" in batches, "Terminateds must be present in the batch"
+        assert "truncateds" in batches, "Truncateds must be present in the batch"
+
         first_key = next(iter(batches))
         batch_size = len(batches[first_key])
 

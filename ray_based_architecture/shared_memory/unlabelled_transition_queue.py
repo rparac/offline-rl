@@ -1,4 +1,5 @@
 import ray
+from typing import List, Optional
 
 @ray.remote
 class UnlabelledTransitionQueue:
@@ -15,7 +16,21 @@ class UnlabelledTransitionQueue:
         """
 
         self.buffer.append(transition_ref)
-        if len(self.buffer) >= self.batch_size:
-            pass
+
+    def pop_batch(self, max_items: Optional[int] = None) -> List[ray.ObjectRef]:
+        """
+        Pops up to `max_items` transition refs (FIFO).
+        Returns an empty list if nothing is available.
+        """
+        if not self.buffer:
+            return []
+
+        n = len(self.buffer) if max_items is None else min(len(self.buffer), int(max_items))
+        batch = self.buffer[:n]
+        del self.buffer[:n]
+        return batch
+
+    def __len__(self) -> int:
+        return len(self.buffer)
 
     

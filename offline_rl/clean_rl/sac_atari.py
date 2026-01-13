@@ -51,7 +51,7 @@ class Args:
     """the id of the environment"""
     total_timesteps: int = 5000000
     """total timesteps of the experiments"""
-    buffer_size: int = int(1e5)
+    buffer_size: int = int(1e4)
     """the replay memory buffer size"""  # smaller than in original paper but evaluation is done only for 100k steps anyway
     gamma: float = 0.99
     """the discount factor gamma"""
@@ -113,7 +113,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         kwargs = {
             "formula": formula,
             "render_mode": "rgb_array",
-            "state_type": "symbolic",
+            "state_type": "image",
+            "normalize_env": False,
             "train": False,
             "use_dfa_state": False,
             "random_start": False,
@@ -124,10 +125,17 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
             env = gym.make(env_id, **kwargs)
+        h, w, c = env.observation_space.shape
+        # Convert to CHW format
         env = gym.wrappers.TransformObservation(
             env, 
-            lambda obs: obs.astype(np.float32),
-            observation_space=gym.spaces.Box(low=0, high=4, shape=(2,), dtype=np.float32)
+            lambda obs: np.transpose(obs, (2, 0, 1)),
+            observation_space=gym.spaces.Box(
+                low=env.observation_space.low.min(), 
+                high=env.observation_space.high.max(), 
+                shape=(c, h, w), 
+                dtype=np.float32
+            )
         )
         env.action_space.seed(seed)
         return env
@@ -149,37 +157,53 @@ class SoftQNetwork(nn.Module):
     def __init__(self, envs):
         super().__init__()
         obs_shape = envs.single_observation_space.shape
-        assert obs_shape[0] == 2, "only symbolic state type is supported"
-        self.lin = nn.Sequential(
-            layer_init(nn.Linear(obs_shape[0], 16)),
+        self.conv = nn.Sequential(
+            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4)),
             nn.ReLU(),
-            layer_init(nn.Linear(16, envs.single_action_space.n)),
+            layer_init(nn.Conv2d(32, 32, kernel_size=4, stride=2)),
+            nn.Flatten(),
         )
 
+        with torch.inference_mode():
+            output_dim = self.conv(torch.zeros(1, *obs_shape)).shape[1]
+
+        self.fc1 = layer_init(nn.Linear(output_dim, 64))
+        self.fc_q = layer_init(nn.Linear(64, envs.single_action_space.n))
+
     def forward(self, x):
-        q_vals = self.lin(x)
+        x = F.relu(self.conv(x / 255.0))
+        x = F.relu(self.fc1(x))
+        q_vals = self.fc_q(x)
         return q_vals
+
 
 
 class Actor(nn.Module):
     def __init__(self, envs):
         super().__init__()
         obs_shape = envs.single_observation_space.shape
-
-        assert obs_shape[0] == 2, "only symbolic state type is supported"
-        self.lin = nn.Sequential(
-            layer_init(nn.Linear(obs_shape[0], 16)),
+        self.conv = nn.Sequential(
+            layer_init(nn.Conv2d(obs_shape[0], 32, kernel_size=8, stride=4)),
             nn.ReLU(),
-            layer_init(nn.Linear(16, envs.single_action_space.n)),
+            layer_init(nn.Conv2d(32, 32, kernel_size=4, stride=2)),
+            nn.Flatten(),
         )
 
+        with torch.inference_mode():
+            output_dim = self.conv(torch.zeros(1, *obs_shape)).shape[1]
+
+        self.fc1 = layer_init(nn.Linear(output_dim, 64))
+        self.fc_logits = layer_init(nn.Linear(64, envs.single_action_space.n))
+
     def forward(self, x):
-        logits = self.lin(x)
+        x = F.relu(self.conv(x))
+        x = F.relu(self.fc1(x))
+        logits = self.fc_logits(x)
+
         return logits
 
     def get_action(self, x):
-        # logits = self(x / 255.0)
-        logits = self(x)
+        logits = self(x / 255.0)
         policy_dist = Categorical(logits=logits)
         action = policy_dist.sample()
         # Action probabilities for calculating the adapted soft-Q loss
