@@ -13,6 +13,20 @@ warnings.filterwarnings("ignore", category=UserWarning, message=".*not writable.
 
 # TODO: Need to pass the prompts ourselves
 
+def _extract_image(obs):
+    """
+    Normalize an observation into a raw image array.
+
+    Supports:
+    - dict obs with an "image" key (common in wrapper-based envs)
+    - raw numpy arrays (e.g., CHW uint8 from vectorized envs)
+    """
+    if isinstance(obs, dict):
+        if "image" not in obs:
+            raise KeyError(f"Expected dict observation to contain key 'image', got keys={list(obs.keys())}")
+        return obs["image"]
+    return obs
+
 def _initialize_similarity_model():
     model_name = "ViT-L-14/openai"
     
@@ -75,15 +89,17 @@ class VLMService:
         batch_size = len(next_observations)
         start_time = time.time()
         
-        # Optimized data transfer: Convert to tensor more efficiently
-        images_only = [obs["image"] for obs in next_observations]
+        # Convert obs to raw images (supports dict obs or raw arrays)
+        obs_images = [_extract_image(o) for o in observations]
+        next_images = [_extract_image(o) for o in next_observations]
         
         # Stack numpy arrays into a single numpy array first (faster)
-        img_numpy = np.stack(images_only, axis=0)
+        obs_numpy = np.stack(obs_images, axis=0)
+        next_numpy = np.stack(next_images, axis=0)
         
         # Convert to torch tensor and transfer to GPU in one go
         # Using pin_memory=True for faster CPU->GPU transfer
-        img_tensor = torch.from_numpy(img_numpy).to(
+        img_tensor = torch.from_numpy(next_numpy).to(
             self.device, 
             dtype=torch.float16,  # Convert to half directly
             non_blocking=True
@@ -93,7 +109,7 @@ class VLMService:
             labels = self.similarity_model.compute_labels(img_tensor)
 
         # Ensure we pass numpy arrays into the replay buffer actor.
-        rewards = labels[:, 0].detach().cpu().numpy()
+        rewards = labels[:, 0].detach().float().cpu().numpy()
         
         # Calculate and record VLM-specific metrics
         inference_time_ms = (time.time() - start_time) * 1000
@@ -118,12 +134,13 @@ class VLMService:
             self.recent_batch_sizes = []
             self.recent_inference_times = []
         
+        print("here")
         # Fire-and-forget: write the whole batch into the replay buffer.
         # NOTE: Serve expects one return value per request; we return rewards per request below.
         self.replay_buffer_handle.add_batch.remote(
-            observations=np.array(observations, dtype=object),
-            next_observations=np.array(next_observations, dtype=object),
-            actions=np.array(actions, dtype=object),
+            observations=obs_numpy,
+            next_observations=next_numpy,
+            actions=np.asarray(actions, dtype=np.int64),
             rewards=rewards,
             terminateds=np.array(terminateds, dtype=np.bool_),
             truncateds=np.array(truncateds, dtype=np.bool_),
@@ -131,6 +148,47 @@ class VLMService:
 
         # One return per original request
         return list(rewards)
+
+    async def add_to_buffer_with_labeling(self, observations, actions, next_observations, terminateds, truncateds):
+        """
+        High-throughput batched endpoint (vector-env friendly).
+
+        Use this when the caller already has a batch dimension (e.g., SyncVectorEnv step()).
+        This avoids per-transition RPC overhead; one request == many transitions.
+        """
+        start_time = time.time()
+
+        obs_images = np.stack([_extract_image(o) for o in np.asarray(observations)], axis=0)
+        next_images = np.stack([_extract_image(o) for o in np.asarray(next_observations)], axis=0)
+        batch_size = int(next_images.shape[0])
+
+        img_tensor = torch.from_numpy(next_images).to(
+            self.device,
+            dtype=torch.float16,
+            non_blocking=True,
+        )
+
+        with torch.no_grad():
+            labels = self.similarity_model.compute_labels(img_tensor)
+
+        rewards = labels[:, 0].detach().float().cpu().numpy()
+
+        inference_time_ms = (time.time() - start_time) * 1000
+        throughput = batch_size / (inference_time_ms / 1000) if inference_time_ms > 0 else 0
+        self.batch_size_gauge.set(batch_size)
+        self.throughput_gauge.set(throughput)
+
+        self.replay_buffer_handle.add_batch.remote(
+            observations=obs_images,
+            next_observations=next_images,
+            actions=np.asarray(actions, dtype=np.int64),
+            rewards=rewards,
+            terminateds=np.asarray(terminateds, dtype=np.bool_),
+            truncateds=np.asarray(truncateds, dtype=np.bool_),
+        )
+
+        # Return is optional for training loops; kept for debugging/metrics.
+        return rewards
 
     
     # TODO: Delete this function if it is unused

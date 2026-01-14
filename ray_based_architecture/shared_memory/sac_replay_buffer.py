@@ -4,6 +4,7 @@ Actor in system memory (RAM) that stores SAC replay buffer data using NumPy arra
 
 import ray
 import numpy as np
+import threading
 
 @ray.remote
 class SACReplayBuffer:
@@ -13,6 +14,8 @@ class SACReplayBuffer:
         self._ptr = 0
         self._size = 0
         self._rng = np.random.default_rng(seed)
+        # Protects ring-buffer pointer/size updates and sampling consistency.
+        self._lock = threading.Lock()
 
     def add_batch(self, **batches):
         """
@@ -32,31 +35,37 @@ class SACReplayBuffer:
         assert "terminateds" in batches, "Terminateds must be present in the batch"
         assert "truncateds" in batches, "Truncateds must be present in the batch"
 
-        first_key = next(iter(batches))
-        batch_size = len(batches[first_key])
+        # Normalize inputs once (keeps dtype/shape consistent and avoids repeated conversions).
+        arrs = {k: np.asarray(v) for k, v in batches.items()}
+        first_key = next(iter(arrs))
+        batch_size = int(arrs[first_key].shape[0])
 
-        if not self._buffer:
-            # Initialize buffers based on the first batch received
-            for key, value in batches.items():
-                val_arr = np.array(value)
-                self._buffer[key] = np.zeros((self.capacity, *val_arr.shape[1:]), dtype=val_arr.dtype)
-        
-        # Calculate how many items to add before wrap-around
-        end_ptr = self._ptr + batch_size
+        # Reserve write regions (disjoint) under lock so multiple calls can safely overlap.
+        with self._lock:
+            if not self._buffer:
+                # Initialize buffers based on the first batch received
+                for key, value in arrs.items():
+                    self._buffer[key] = np.zeros((self.capacity, *value.shape[1:]), dtype=value.dtype)
+
+            start = int(self._ptr)
+            end_ptr = start + batch_size
+            self._ptr = (start + batch_size) % self.capacity
+            self._size = min(self._size + batch_size, self.capacity)
+
         if end_ptr <= self.capacity:
-            # No wrap-around needed
-            for key, value in batches.items():
-                self._buffer[key][self._ptr:end_ptr] = value
+            # No wrap-around
+            sl = slice(start, end_ptr)
+            for key, value in arrs.items():
+                np.copyto(self._buffer[key][sl], value, casting="no")
         else:
             # Wrap-around: fill to the end, then start from the beginning
+            num_to_end = self.capacity - start
             overflow = end_ptr - self.capacity
-            num_to_end = self.capacity - self._ptr
-            for key, value in batches.items():
-                self._buffer[key][self._ptr:] = value[:num_to_end]
-                self._buffer[key][:overflow] = value[num_to_end:]
-            
-        self._ptr = (self._ptr + batch_size) % self.capacity
-        self._size = min(self._size + batch_size, self.capacity)
+            sl1 = slice(start, self.capacity)
+            sl2 = slice(0, overflow)
+            for key, value in arrs.items():
+                np.copyto(self._buffer[key][sl1], value[:num_to_end], casting="no")
+                np.copyto(self._buffer[key][sl2], value[num_to_end:], casting="no")
 
     def sample(self, batch_size: int):
         """
@@ -66,11 +75,15 @@ class SACReplayBuffer:
             A dictionary where each key is a transition field and 
             each value is a NumPy array of shape (batch_size, ...).
         """
-        if self._size == 0:
-            return {}
-            
-        indices = self._rng.choice(self._size, size=batch_size, replace=False)
-        return {key: arr[indices] for key, arr in self._buffer.items()}
+        with self._lock:
+            if self._size == 0:
+                return {}
+            # Guard against requesting more than we have.
+            bs = int(min(batch_size, self._size))
+            indices = self._rng.choice(self._size, size=bs, replace=False)
+            # Copy so training sees a consistent snapshot even if writers run concurrently.
+            return {key: arr[indices].copy() for key, arr in self._buffer.items()}
 
     def __len__(self):
-        return self._size
+        with self._lock:
+            return self._size
