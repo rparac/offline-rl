@@ -26,11 +26,18 @@ Episode 3 Summary - Min/Second Smallest Similarity Values
     Second Smallest: 0.1536
 ============================================================
 """
-prompts_with_thresholds = {
+old_prompts_with_thresholds = {
     "Grey and yellow pickaxe": (0.1080 + 0.1407) / 2,
     "Blue diamond gem": (0.1191 + 0.1475) / 2,
     "Open red double door": (0.1326 + 0.1738) / 2,
     "Orange and yellow magma texture": (0.1488 + 0.1536) / 2,
+}
+# New architecture has slightly different values. Not sure why
+prompts_with_thresholds = {
+    "Grey and yellow pickaxe": (0.1402 + 0.1822) / 2,
+    "Blue diamond gem": (0.1265 + 0.1462) / 2,
+    "Open red double door": (0.1134 + 0.1455) / 2,
+    "Orange and yellow magma texture": (0.1550 + 0.1803) / 2,
 }
 
 
@@ -125,6 +132,7 @@ def compute_visual_minecraft_labels(
     thresholds = torch.tensor(list(prompts_with_thresholds.values()), device=similarities.device)
 
     labels = similarities < thresholds.unsqueeze(0)
+    print(similarities)
 
     return labels
 

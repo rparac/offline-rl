@@ -22,9 +22,17 @@ from env.visual_minecraft.env import GridWorldEnv
 from ray_based_architecture.env.clip_obs_wrapper import BatchCLIPObsWrapper
 from ray_based_architecture.shared_memory.sac_replay_buffer import SACReplayBuffer
 from ray_based_architecture.vlm_service import VLMService
+# TODO: Implement distributed experience collection using ray_based_architecture.experience_collector
+# For high-throughput collection:
+#   - Create multiple ExperienceCollector actors (each with num_gpus=0.5)
+#   - Each collector runs envs + CLIP embedding independently
+#   - Collectors write to shared replay buffer via VLM service
+#   - Training loop periodically syncs updated policy to collectors
+#   - Benefits: parallel GPU usage, continuous collection during training
 
 
 
+# TODO: if we need to speed things up more.
 
 @dataclass
 class Args:
@@ -273,8 +281,6 @@ def train(args: Args):
     serve_app_name = args.serve_app_name or f"vlm_{replay_buffer_namespace.replace('-', '_')}"
     reward_labeller = serve.run(VLMService.bind(replay_buffer_name, replay_buffer_namespace), name=serve_app_name)
     start_time = time.time()
-    # Keep explicit control over inflight refs; do NOT use deque(maxlen=...) or it can
-    # silently drop refs (and hide Serve exceptions).
     inflight_label_refs = deque()
 
     try:
