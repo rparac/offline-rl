@@ -1,3 +1,14 @@
+"""
+Environment change:
+ - observation becomes a dictionary
+    - "image_embedding" is the CLIP embedding of the observation
+    - "rm_state" current RM state
+
+  - next observation could not be computed without a VLM
+    - let's move its computation outside the VLM service and inside a env wrapper
+"""
+
+
 import ray
 from ray import serve
 from ray.util.metrics import Counter, Gauge, Histogram
@@ -130,7 +141,7 @@ class VLMService:
             observations=observations,
             next_observations=next_observations,
             actions=np.asarray(actions, dtype=np.int64),
-            rewards=rewards,
+            rewards=custom_rewards,
             terminateds=np.asarray(terminateds, dtype=np.bool_),
             truncateds=np.asarray(truncateds, dtype=np.bool_),
         )
