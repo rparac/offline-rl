@@ -40,6 +40,8 @@ prompts_with_thresholds = {
     "Orange and yellow magma texture": (0.1550 + 0.1803) / 2,
 }
 
+idx_to_vis_minecraft_prompt = {i: prompt for i, prompt in enumerate(prompts_with_thresholds.keys())}
+
 
 
 class VisualMinecraftCLIPSimilarityModel(nn.Module):
