@@ -1,0 +1,50 @@
+program: ray_based_architecture/rl/discrete_sac.py
+method: bayes
+metric:
+  name: charts/episodic_return
+  goal: maximize
+
+# Only the parameters below are tuned. Everything else is fixed via `command`.
+parameters:
+  batch-size:
+    values: [256, 512, 1024]
+  policy-lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 3e-4
+  q-lr:
+    distribution: log_uniform_values
+    min: 1e-5
+    max: 3e-4
+  update-frequency:
+    values: [1, 2, 4, 8, 16, 32]
+  target-update-frequency:
+    values: [1, 2, 4, 8, 16, 32, 64]
+  starting-alpha:
+    distribution: log_uniform_values
+    min: 0.01
+    max: 1.0
+  target-entropy-scale:
+    distribution: uniform
+    min: 0.05
+    max: 1.0
+
+command:
+  - ${env}
+  - ${interpreter}
+  - ${program}
+  - --track
+  - --no-capture-video
+  # Fix everything else here (edit as needed for your setup):
+  - --env-id=VisualMinecraft-v0
+  - --total-timesteps=10000
+  - --buffer-size=10000
+  - --gamma=0.99
+  - --tau=0.005
+  - --learning-starts=2000
+  - --autotune
+  - --num-envs=8
+  # Tuned knobs (W&B agent fills these in from `parameters:` above):
+  - ${args}
+
+

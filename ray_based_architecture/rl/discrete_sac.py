@@ -84,7 +84,7 @@ class Args:
     """coefficient for scaling the autotune entropy target"""
     num_envs: int = 8
     """the number of environments to run in parallel"""
-    max_inflight_label_requests: int = 500
+    max_inflight_label_requests: int = 2000
     """max number of outstanding reward-labeling requests to Ray Serve (backpressure)"""
     replay_buffer_num_cpus: int = 1
     """CPU resources reserved for the replay buffer actor"""
@@ -113,18 +113,6 @@ def make_env(env_id, seed, idx, capture_video, run_name):
             env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         else:
             env = gym.make(env_id, **kwargs)
-        h, w, c = env.observation_space.shape
-        # Convert to CHW format
-        env = gym.wrappers.TransformObservation(
-            env, 
-            lambda obs: np.transpose(obs, (2, 0, 1)),
-            observation_space=gym.spaces.Box(
-                low=env.observation_space.low.min(), 
-                high=env.observation_space.high.max(), 
-                shape=(c, h, w), 
-                dtype=np.float32
-            )
-        )
         env.action_space.seed(seed)
         return env
 
@@ -193,6 +181,13 @@ class Actor(nn.Module):
 
 
 def train(args: Args):
+    # TODO: Important to remove this later when we will have a single Ray cluster for debugging
+    #   Also remove ray.shutdown() from the finally block
+
+    # Initialize Ray with local resources (each training run gets its own instance)
+    # This is important for parallel sweeps: CUDA_VISIBLE_DEVICES isolates GPUs
+    ray.init(ignore_reinit_error=True, log_to_driver=False)
+    
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
         import wandb
@@ -301,6 +296,7 @@ def train(args: Args):
             ref = reward_labeller.add_to_buffer_with_labeling.remote(
                 observations=obs,
                 actions=actions,
+                rewards=rewards,
                 next_observations=next_obs,
                 terminateds=terminations,
                 truncateds=truncations,
@@ -449,6 +445,13 @@ def train(args: Args):
             ray.kill(rb)
         except Exception as e:
             print(f"Warning: failed to kill replay buffer actor: {e}")
+        
+        # Shutdown Ray to release all resources
+        try:
+            print("Shutting down Ray...")
+            ray.shutdown()
+        except Exception as e:
+            print(f"Warning: failed to shutdown Ray: {e}")
         
         print("Cleanup complete.")
 

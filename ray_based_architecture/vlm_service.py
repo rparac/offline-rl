@@ -78,7 +78,7 @@ class VLMService:
             print(f"[VLMService.__init__] FATAL: Could not find replay buffer '{replay_buffer_name}' in namespace '{replay_buffer_namespace}': {e}", flush=True)
             raise
 
-    async def add_to_buffer_with_labeling(self, observations, actions, next_observations, 
+    async def add_to_buffer_with_labeling(self, observations, actions, rewards, next_observations, 
                                             terminateds, truncateds):
         """
         High-throughput batched endpoint (vector-env friendly).
@@ -105,7 +105,6 @@ class VLMService:
 
         with torch.no_grad():
             similarities = self.similarity_model.forward(embedding_tensor)
-            print(similarities)
             labels = self.similarity_model.labels_from_similarities(similarities)
             # if labels[:, 0].item():
             #     print("pickaxe")
@@ -116,7 +115,10 @@ class VLMService:
             # elif labels[:, 3].item():
             #     print("lava")
 
-        rewards = labels[:, 0].detach().float().cpu().numpy()
+        custom_rewards = labels[:, 0].detach().float().cpu().numpy()
+
+        assert custom_rewards.shape == rewards.shape
+        assert (rewards == custom_rewards).all()
 
         inference_time_ms = (time.time() - start_time) * 1000
         throughput = batch_size / (inference_time_ms / 1000) if inference_time_ms > 0 else 0
@@ -134,7 +136,7 @@ class VLMService:
         )
 
         # Return is optional for training loops; kept for debugging/metrics.
-        return rewards
+        return custom_rewards
 
     
 # This starts the "cluster" of consumers if run directly
