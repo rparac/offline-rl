@@ -5,7 +5,7 @@ import time
 import numpy as np
 
 from env.visual_minecraft.fixed_len_env import GridWorldEnv
-from ray_based_architecture.vlm_service import VLMService, _initialize_similarity_model
+from ray_based_architecture.vlm_service import VLMService, initialize_similarity_model
 
 items = ["pickaxe", "lava", "door", "gem", "empty"]
 formula = "(F c0)", 5, "task0: visit({1})".format(*items)
@@ -40,7 +40,7 @@ img_tensor = torch.stack([torch.from_numpy(img) for img in obs_list])
 img_tensor = img_tensor.to(torch.device("cuda"))
 img_tensor = img_tensor.half()
 
-similarity_model = _initialize_similarity_model()
+similarity_model = initialize_similarity_model()
 
 labels = similarity_model.compute_labels(img_tensor)
 

@@ -27,7 +27,7 @@ def _extract_image(obs):
         return obs["image"]
     return obs
 
-def _initialize_similarity_model():
+def initialize_similarity_model():
     model_name = "ViT-L-14/openai"
     
     similarity_model = load_visual_minecraft_similarity_model(
@@ -35,6 +35,7 @@ def _initialize_similarity_model():
         cache_dir="/data/private/rp218/open_clip",
     )
     similarity_model = similarity_model.to(torch.device("cuda"))
+    similarity_model = similarity_model.half()
 
     return similarity_model
 
@@ -50,7 +51,7 @@ class VLMService:
         # Ray sets CUDA_VISIBLE_DEVICES, so "cuda" points to the assigned GPU
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"Loading VLM Model on {self.device}...", flush=True)
-        self.similarity_model = _initialize_similarity_model()
+        self.similarity_model = initialize_similarity_model()
         self.similarity_model.to(self.device)
         
         # VLM-specific metrics (Ray already provides latency and request metrics)
@@ -70,7 +71,12 @@ class VLMService:
 
         # Avoid passing ActorHandles into Serve replicas (can hit deserialization bugs).
         # Instead, look it up by (name, namespace) from inside the replica process.
-        self.replay_buffer_handle = ray.get_actor(replay_buffer_name, namespace=replay_buffer_namespace)
+        try:
+            self.replay_buffer_handle = ray.get_actor(replay_buffer_name, namespace=replay_buffer_namespace)
+            print(f"[VLMService.__init__] Successfully found replay buffer '{replay_buffer_name}' in namespace '{replay_buffer_namespace}'", flush=True)
+        except Exception as e:
+            print(f"[VLMService.__init__] FATAL: Could not find replay buffer '{replay_buffer_name}' in namespace '{replay_buffer_namespace}': {e}", flush=True)
+            raise
 
     # One request == one transition. Ray Serve batches requests across producers.
     @serve.batch(
@@ -134,7 +140,6 @@ class VLMService:
             self.recent_batch_sizes = []
             self.recent_inference_times = []
         
-        print("here")
         # Fire-and-forget: write the whole batch into the replay buffer.
         # NOTE: Serve expects one return value per request; we return rewards per request below.
         self.replay_buffer_handle.add_batch.remote(
@@ -149,27 +154,33 @@ class VLMService:
         # One return per original request
         return list(rewards)
 
-    async def add_to_buffer_with_labeling(self, observations, actions, next_observations, terminateds, truncateds):
+    async def add_to_buffer_with_labeling(self, observations, actions, next_observations, 
+                                            terminateds, truncateds):
         """
         High-throughput batched endpoint (vector-env friendly).
-
-        Use this when the caller already has a batch dimension (e.g., SyncVectorEnv step()).
-        This avoids per-transition RPC overhead; one request == many transitions.
+        
+        Reuses CLIP embeddings from BatchCLIPObsWrapper for both agent and reward computation.
+        
+        Args:
+            observations: CLIP embeddings of observations (batch_size, 768)
+            actions: actions taken (batch_size,)
+            next_observations: CLIP embeddings of next observations (batch_size, 768)
+            terminateds: terminal flags (batch_size,)
+            truncateds: truncation flags (batch_size,)
         """
         start_time = time.time()
+        batch_size = int(next_observations.shape[0])
 
-        obs_images = np.stack([_extract_image(o) for o in np.asarray(observations)], axis=0)
-        next_images = np.stack([_extract_image(o) for o in np.asarray(next_observations)], axis=0)
-        batch_size = int(next_images.shape[0])
-
-        img_tensor = torch.from_numpy(next_images).to(
+        # Compute rewards from CLIP embeddings (already computed by BatchCLIPObsWrapper)
+        embedding_tensor = torch.from_numpy(next_observations).to(
             self.device,
             dtype=torch.float16,
             non_blocking=True,
         )
 
         with torch.no_grad():
-            labels = self.similarity_model.compute_labels(img_tensor)
+            similarities = self.similarity_model.forward(embedding_tensor)
+            labels = self.similarity_model.labels_from_similarities(similarities)
 
         rewards = labels[:, 0].detach().float().cpu().numpy()
 
@@ -178,14 +189,20 @@ class VLMService:
         self.batch_size_gauge.set(batch_size)
         self.throughput_gauge.set(throughput)
 
-        self.replay_buffer_handle.add_batch.remote(
-            observations=obs_images,
-            next_observations=next_images,
-            actions=np.asarray(actions, dtype=np.int64),
-            rewards=rewards,
-            terminateds=np.asarray(terminateds, dtype=np.bool_),
-            truncateds=np.asarray(truncateds, dtype=np.bool_),
-        )
+        # Store CLIP embeddings in replay buffer for fast sampling
+        try:
+            ref = self.replay_buffer_handle.add_batch.remote(
+                observations=observations,
+                next_observations=next_observations,
+                actions=np.asarray(actions, dtype=np.int64),
+                rewards=rewards,
+                terminateds=np.asarray(terminateds, dtype=np.bool_),
+                truncateds=np.asarray(truncateds, dtype=np.bool_),
+            )
+            # Don't await - fire and forget. If this fails, we'll see it in Ray logs.
+        except Exception as e:
+            print(f"[VLMService] ERROR calling add_batch.remote: {e}", flush=True)
+            raise
 
         # Return is optional for training loops; kept for debugging/metrics.
         return rewards
