@@ -44,6 +44,7 @@ command:
   - --learning-starts=2000
   - --autotune
   - --num-envs=8
+  - --use-multiple-agents  # Each sweep agent gets its own Ray instance
   # Tuned knobs (W&B agent fills these in from `parameters:` above):
   - ${args}
 

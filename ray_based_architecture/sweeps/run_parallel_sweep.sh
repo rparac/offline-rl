@@ -49,8 +49,8 @@ done
 
 echo ""
 echo "All agents launched!"
-echo "Monitor logs with:"
-echo "  tail -f logs/sweep_agents/agent_gpu*.log"
 echo ""
-echo "Kill all agents with:"
-echo "  pkill -f 'wandb agent $SWEEP_ID'"
+echo "Commands:"
+echo "  Check status:      bash ray_based_architecture/sweeps/check_sweep_status.sh"
+echo "  View logs:         tail -f logs/sweep_agents/agent_gpu*.log"
+echo "  Stop all agents:   bash ray_based_architecture/sweeps/stop_sweep.sh"

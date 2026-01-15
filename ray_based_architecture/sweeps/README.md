@@ -53,19 +53,19 @@ CUDA_VISIBLE_DEVICES=3 wandb agent <sweep_id>
 
 ### 3. Monitor Progress
 
+**Check status of all processes:**
+```bash
+bash ray_based_architecture/sweeps/check_sweep_status.sh
+```
+
 **View logs in real-time:**
 ```bash
 tail -f logs/sweep_agents/agent_gpu*.log
 ```
 
-**Check GPU usage and recent logs:**
-```bash
-bash ray_based_architecture/sweeps/monitor_sweep.sh
-```
-
 **Watch continuously (updates every 5 seconds):**
 ```bash
-watch -n 5 bash ray_based_architecture/sweeps/monitor_sweep.sh
+watch -n 5 bash ray_based_architecture/sweeps/check_sweep_status.sh
 ```
 
 **View WandB dashboard:**
@@ -75,21 +75,42 @@ watch -n 5 bash ray_based_architecture/sweeps/monitor_sweep.sh
 
 ### 4. Stop Agents
 
+**Stop all agents and training processes:**
 ```bash
 bash ray_based_architecture/sweeps/stop_sweep.sh
 ```
 
-Or manually:
+This will:
+1. Send SIGTERM to wandb agents (graceful shutdown)
+2. Send SIGTERM to Python training scripts (triggers cleanup)
+3. Force kill any remaining processes with SIGKILL
+4. Clean up orphaned Ray processes
+
+**Check if anything is still running:**
 ```bash
-pkill -f "wandb agent"
+bash ray_based_architecture/sweeps/check_sweep_status.sh
 ```
 
 ## How It Works
 
 1. **GPU Isolation**: Each agent runs with `CUDA_VISIBLE_DEVICES` set to a specific GPU, ensuring no GPU contention
-2. **Independent Ray Instances**: Each training run starts its own Ray instance (via `ray.init()`)
+2. **Independent Ray Instances**: Each training run starts its own Ray instance (controlled by `--use-multiple-agents` flag)
 3. **Shared Sweep Queue**: All agents pull hyperparameter configs from the same WandB sweep
 4. **Parallel Execution**: Each agent trains models independently in parallel
+
+### Ray Initialization Modes
+
+The `--use-multiple-agents` flag controls Ray initialization:
+
+- **`--use-multiple-agents`** (parallel sweeps): Each training run calls `ray.init()` and `ray.shutdown()`
+  - ✅ Use for: WandB parallel sweeps, isolated experiments
+  - ✅ Each agent gets independent Ray instance
+  - ✅ Clean resource cleanup after each run
+
+- **No flag** (single run): Uses existing Ray cluster without init/shutdown
+  - ✅ Use for: Single training runs, debugging with persistent Ray cluster
+  - ✅ Faster iteration (no Ray startup overhead)
+  - ✅ Can inspect Ray dashboard between runs
 
 ## Resource Requirements
 
@@ -136,10 +157,13 @@ bash ray_based_architecture/sweeps/run_parallel_sweep.sh <sweep_id> 8
 - Reduce `--batch-size` range
 
 ### Ray connection issues
-Make sure your training script uses local Ray init:
-```python
-ray.init(ignore_reinit_error=True)  # Local instance
-# NOT: ray.init(address='auto')  # Shared cluster
+
+**For parallel sweeps**, the `--use-multiple-agents` flag is already set in `sac_atari_hparams.yaml`.
+
+**For single runs**, connect to Ray first:
+```bash
+ray start --head  # Or ray.init(address='auto') in code
+python ray_based_architecture/rl/discrete_sac.py  # Without --use-multiple-agents
 ```
 
 ### Cleanup stale Ray processes

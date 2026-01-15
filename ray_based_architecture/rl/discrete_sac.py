@@ -62,15 +62,15 @@ class Args:
     """the discount factor gamma"""
     tau: float = 0.005
     """target smoothing coefficient (default: 1)"""
-    batch_size: int = 1024
+    batch_size: int = 512
     """the batch size of sample from the reply memory"""
-    learning_starts: int = 1000 # 20_000
+    learning_starts: int = 2000
     """timestep to start learning"""
-    policy_lr: float = 1.643635422220151e-5
+    policy_lr: float = 0.00004127483240070165
     """the learning rate of the policy network optimizer"""
-    q_lr: float = 2.598708244275053e-4
+    q_lr: float = 0.00019077115118374603
     """the learning rate of the Q network network optimizer"""
-    update_frequency: int = 4
+    update_frequency: int = 1
     """the frequency of training updates"""
     target_update_frequency: int = 64
     """the frequency of updates for the target networks"""
@@ -78,9 +78,9 @@ class Args:
     """Entropy regularization coefficient."""
     autotune: bool = True
     """automatic tuning of the entropy coefficient"""
-    starting_alpha: float = 0.028587048900796424
+    starting_alpha: float = 0.2722738446422038
     """the starting value of the entropy coefficient with autotune"""
-    target_entropy_scale: float = 0.18336036114441231
+    target_entropy_scale: float = 0.2232439060872044
     """coefficient for scaling the autotune entropy target"""
     num_envs: int = 8
     """the number of environments to run in parallel"""
@@ -92,6 +92,8 @@ class Args:
     """max concurrent requests to replay buffer (sample() gets priority via internal condition variables)"""
     serve_app_name: str = ""
     """Ray Serve application name. If empty, we auto-generate a unique name per Ray namespace to avoid cross-run conflicts."""
+    use_multiple_agents: bool = False
+    """If True, initializes/shuts down Ray for each run (needed for parallel sweeps). If False, uses existing Ray cluster."""
 
 def make_env(env_id, seed, idx, capture_video, run_name):
 
@@ -181,12 +183,11 @@ class Actor(nn.Module):
 
 
 def train(args: Args):
-    # TODO: Important to remove this later when we will have a single Ray cluster for debugging
-    #   Also remove ray.shutdown() from the finally block
-
-    # Initialize Ray with local resources (each training run gets its own instance)
-    # This is important for parallel sweeps: CUDA_VISIBLE_DEVICES isolates GPUs
-    ray.init(ignore_reinit_error=True, log_to_driver=False)
+    # Initialize Ray with local resources if running parallel sweeps
+    # For single runs with a persistent cluster, skip this (use existing Ray instance)
+    if args.use_multiple_agents:
+        ray.init(ignore_reinit_error=True, log_to_driver=False)
+        print("[Setup] Initialized local Ray instance for parallel sweep agent")
     
     run_name = f"{args.env_id}__{args.exp_name}__{args.seed}__{int(time.time())}"
     if args.track:
@@ -446,12 +447,13 @@ def train(args: Args):
         except Exception as e:
             print(f"Warning: failed to kill replay buffer actor: {e}")
         
-        # Shutdown Ray to release all resources
-        try:
-            print("Shutting down Ray...")
-            ray.shutdown()
-        except Exception as e:
-            print(f"Warning: failed to shutdown Ray: {e}")
+        # Shutdown Ray if we initialized it for parallel sweeps
+        if args.use_multiple_agents:
+            try:
+                print("Shutting down Ray...")
+                ray.shutdown()
+            except Exception as e:
+                print(f"Warning: failed to shutdown Ray: {e}")
         
         print("Cleanup complete.")
 
