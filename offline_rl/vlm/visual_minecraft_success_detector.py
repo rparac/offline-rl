@@ -26,21 +26,32 @@ Episode 3 Summary - Min/Second Smallest Similarity Values
     Second Smallest: 0.1536
 ============================================================
 """
+# Label name constants - prevents typos
+LABEL_GREY_YELLOW_PICKAXE = "Grey and yellow pickaxe"
+LABEL_BLUE_DIAMOND_GEM = "Blue diamond gem"
+LABEL_OPEN_RED_DOUBLE_DOOR = "Open red double door"
+LABEL_ORANGE_YELLOW_MAGMA = "Orange and yellow magma texture"
+
 old_prompts_with_thresholds = {
-    "Grey and yellow pickaxe": (0.1080 + 0.1407) / 2,
-    "Blue diamond gem": (0.1191 + 0.1475) / 2,
-    "Open red double door": (0.1326 + 0.1738) / 2,
-    "Orange and yellow magma texture": (0.1488 + 0.1536) / 2,
-}
-# New architecture has slightly different values. Not sure why
-prompts_with_thresholds = {
-    "Grey and yellow pickaxe": (0.1402 + 0.1822) / 2,
-    "Blue diamond gem": (0.1265 + 0.1462) / 2,
-    "Open red double door": (0.1134 + 0.1455) / 2,
-    "Orange and yellow magma texture": (0.1550 + 0.1628) / 2,
+    LABEL_GREY_YELLOW_PICKAXE: (0.1080 + 0.1407) / 2,
+    LABEL_BLUE_DIAMOND_GEM: (0.1191 + 0.1475) / 2,
+    LABEL_OPEN_RED_DOUBLE_DOOR: (0.1326 + 0.1738) / 2,
+    LABEL_ORANGE_YELLOW_MAGMA: (0.1488 + 0.1536) / 2,
 }
 
-idx_to_vis_minecraft_prompt = {i: prompt for i, prompt in enumerate(prompts_with_thresholds.keys())}
+# New architecture has slightly different values. Not sure why
+prompts_with_thresholds = {
+    LABEL_GREY_YELLOW_PICKAXE: (0.1402 + 0.1822) / 2,
+    LABEL_BLUE_DIAMOND_GEM: (0.1265 + 0.1462) / 2,
+    LABEL_OPEN_RED_DOUBLE_DOOR: (0.1134 + 0.1455) / 2,
+    LABEL_ORANGE_YELLOW_MAGMA: (0.1550 + 0.1628) / 2,
+}
+
+# Label order constant - matches the order of keys in prompts_with_thresholds
+# This defines the order of labels in binary label vectors
+VISUAL_MINECRAFT_LABEL_ORDER = list(prompts_with_thresholds.keys())
+
+idx_to_vis_minecraft_prompt = {i: prompt for i, prompt in enumerate(VISUAL_MINECRAFT_LABEL_ORDER)}
 
 
 

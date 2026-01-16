@@ -1,6 +1,5 @@
 # docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/sac/#sac_ataripy
 from collections import deque
-import os
 import random
 import time
 from dataclasses import dataclass
@@ -9,7 +8,6 @@ import gymnasium as gym
 from tqdm import trange
 import numpy as np
 import ray
-from ray import serve
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -22,12 +20,14 @@ from env.visual_minecraft.env import GridWorldEnv
 from ray_based_architecture.env.clip_obs_and_labels_wrapper import BatchCLIPObsAndLabelsWrapper
 from ray_based_architecture.env.rm_wrapper import RMWrapper
 from ray_based_architecture.shared_memory.sac_replay_buffer import SACReplayBuffer
-from ray_based_architecture.vlm_service import VLMService
 from ray_based_architecture.reward_machine.reward_machine import RewardMachine
+from offline_rl.vlm.visual_minecraft_success_detector import (
+    VISUAL_MINECRAFT_LABEL_ORDER,
+    LABEL_GREY_YELLOW_PICKAXE,
+    LABEL_ORANGE_YELLOW_MAGMA,
+)
 
 
-
-# TODO: if we need to speed things up more.
 
 @dataclass
 class Args:
@@ -85,8 +85,6 @@ class Args:
     """CPU resources reserved for the replay buffer actor"""
     replay_buffer_max_concurrency: int = 16
     """max concurrent requests to replay buffer (sample() gets priority via internal condition variables)"""
-    serve_app_name: str = ""
-    """Ray Serve application name. If empty, we auto-generate a unique name per Ray namespace to avoid cross-run conflicts."""
     use_multiple_agents: bool = False
     """If True, initializes/shuts down Ray for each run (needed for parallel sweeps). If False, uses existing Ray cluster."""
 
@@ -94,7 +92,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
     def thunk():
         items = ["pickaxe", "lava", "door", "gem", "empty"]
-        formula = "(F c0)", 5, "task0: visit({1})".format(*items)
+        # formula = "(F c0)", 5, "task0: visit({1})".format(*items)
+        formula = "F(c0 & F(c1))", 5, "task3: seq_visit({0}, {1})".format(*items)
         kwargs = {
             "formula": formula,
             "render_mode": "rgb_array",
@@ -237,6 +236,7 @@ def train(args: Args):
 
     seen_rewards = deque(maxlen=100)
     seen_lengths = deque(maxlen=100)
+    seen_original_rewards = deque(maxlen=100)
 
 
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
@@ -253,20 +253,13 @@ def train(args: Args):
     rm.set_u0("u0")
     rm.set_uacc("uacc")
     
-    # Add transitions based on CLIP labels
-    # Label order from visual_minecraft_success_detector:
-    # 0: "Grey and yellow pickaxe"
-    # 1: "Blue diamond gem"
-    # 2: "Open red double door"
-    # 3: "Orange and yellow magma texture"
     # u0 --[Grey and yellow pickaxe]--> u1
-    # u1 --[Blue diamond gem]--> uacc
-    rm.add_transition("u0", "u1", ("Grey and yellow pickaxe",))
-    rm.add_transition("u1", "uacc", ("Blue diamond gem",))
+    # u1 --[Orange and yellow magma texture]--> uacc
+    rm.add_transition("u0", "u1", (LABEL_GREY_YELLOW_PICKAXE,))
+    rm.add_transition("u1", "uacc", (LABEL_ORANGE_YELLOW_MAGMA,))
     
     # Build transition matrix with label order matching visual_minecraft_success_detector
-    label_order = ["Grey and yellow pickaxe", "Blue diamond gem", "Open red double door", "Orange and yellow magma texture"]
-    rm.build_transition_matrix(label_order)
+    rm.build_transition_matrix(VISUAL_MINECRAFT_LABEL_ORDER)
     
     print(f"[Setup] Reward machine with {len(rm.states)} states initialized")
     print(rm)
@@ -318,11 +311,6 @@ def train(args: Args):
     ).remote(capacity=args.buffer_size, seed=args.seed)
     print(f"[Setup] Replay buffer actor '{replay_buffer_name}' created in namespace '{replay_buffer_namespace}' with max_concurrency={args.replay_buffer_max_concurrency}", flush=True)
     
-    # IMPORTANT: Serve apps are global across the cluster; using a fixed name like "default"
-    # can cause one run to overwrite another run's deployment args (and thus write into the wrong
-    # replay buffer namespace). Use a unique app name per namespace/run unless you *intend* to share.
-    serve_app_name = args.serve_app_name or f"vlm_{replay_buffer_namespace.replace('-', '_')}"
-    reward_labeller = serve.run(VLMService.bind(replay_buffer_name, replay_buffer_namespace), name=serve_app_name)
     start_time = time.time()
     inflight_label_refs = deque()
 
@@ -347,9 +335,8 @@ def train(args: Args):
             # RMWrapper handles RM state transitions and computes RM-based rewards automatically
             next_obs, rewards, terminations, truncations, infos = envs.step(actions)
             
-            # High-throughput path: one Serve request per vector-env step (batch == num_envs)
-            # Pass full Dict observations - VLMService will extract image embeddings for labeling
-            ref = reward_labeller.add_to_buffer_with_labeling.remote(
+            # Add transitions to replay buffer
+            ref = rb.add_batch.remote(
                 observations=obs,
                 actions=actions,
                 rewards=rewards,
@@ -360,8 +347,8 @@ def train(args: Args):
             inflight_label_refs.append(ref)
             # Backpressure: occasionally drain so we don't build an unbounded queue.
             if len(inflight_label_refs) >= args.max_inflight_label_requests:
-                # Block on the oldest request to keep memory bounded.
-                inflight_label_refs.popleft().result()
+                # For Ray actors, use ray.get to wait for completion of the oldest request.
+                ray.get(inflight_label_refs.popleft())
             # Periodically log buffer fill.
             if global_step % 1000 == 0:
                 rb_size = ray.get(rb.__len__.remote())
@@ -378,12 +365,16 @@ def train(args: Args):
                 lengths_to_log = infos["episode"]["l"][terminated_episodes].tolist()
                 seen_lengths.extend(lengths_to_log)
 
-
                 avg_reward = sum(seen_rewards) / len(seen_rewards)
                 avg_length = sum(seen_lengths) / len(seen_lengths)
                 writer.add_scalar("charts/episodic_return", avg_reward, global_step)
                 writer.add_scalar("charts/episodic_length", avg_length, global_step)
 
+                if "original_reward" in infos:
+                    original_rewards_to_log = infos["original_reward"][terminated_episodes].tolist()
+                    seen_original_rewards.extend(original_rewards_to_log)
+                    avg_original_reward = sum(seen_original_rewards) / len(seen_original_rewards)
+                    writer.add_scalar("charts/episodic_original_return", avg_original_reward, global_step)
 
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
             obs = next_obs
@@ -494,13 +485,6 @@ def train(args: Args):
         print("Closing environments and writer...")
         envs.close()
         writer.close()
-        
-        # Delete the Serve app created for this run
-        try:
-            print(f"Deleting Serve app '{serve_app_name}'...")
-            serve.delete(serve_app_name)
-        except Exception as e:
-            print(f"Warning: failed to delete Serve app: {e}")
         
         # Kill the replay buffer actor
         try:

@@ -54,7 +54,6 @@ class BatchCLIPObsAndLabelsWrapper(gym.vector.VectorWrapper):
     def _compute_labels(self, embedded_obs):
         with torch.no_grad():
             similarities = self._similarity_model.forward(embedded_obs)
-            print(f"Similarities: {similarities}")
             labels = self._similarity_model.labels_from_similarities(similarities)
 
         return labels

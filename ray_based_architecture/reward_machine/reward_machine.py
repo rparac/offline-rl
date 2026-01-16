@@ -170,22 +170,25 @@ class RewardMachine:
             raise Exception("Trying to make rm transition function non-deterministic.")
         else:
             self.transitions[u1][event] = u2
-
-
+    
     def get_reward(self, u1, u2):
-        if isinstance(u1, np.ndarray):
-            state_diff = u2 - u1
-            # Difference between how much "closer" we are to the accepting state
-            #  compared to the rejecting state
-            reward = self.accepting_state_prob(state_diff) - self.rejecting_state_prob(state_diff)
-            return reward
+        assert isinstance(u1, np.ndarray) and isinstance(u2, np.ndarray)
 
-        if u1 not in (self.uacc, self.urej):
-            if u2 == self.uacc:
-                return 1
-            elif u2 == self.urej:
-                return -1
-        return 0
+        u1_idx = np.argmax(u1, axis=1)
+        u2_idx = np.argmax(u2, axis=1)
+
+        # Assert u1 is a vector [0, 0, 1] * batch
+        accepting_state_idx = self.to_idx(self.uacc)
+        rejecting_state_idx = self.to_idx(self.urej)
+
+        is_new_accepting_state = (u2_idx == accepting_state_idx) & (u1_idx != accepting_state_idx)
+        is_new_rejecting_state = (u2_idx == rejecting_state_idx) & (u1_idx != rejecting_state_idx)
+
+        accepting_state_reward = 1 * is_new_accepting_state.astype(np.float32)
+        rejecting_state_reward = -1 * is_new_rejecting_state.astype(np.float32)
+        reward = accepting_state_reward + rejecting_state_reward
+
+        return reward
 
     def _has_cycles(self, curr_node, visited):
         successor_states = [self.transitions[curr_node][e] for e in self.transitions[curr_node].keys()]

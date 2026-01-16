@@ -186,6 +186,14 @@ class GridWorldEnv(gym.Env):
             pil_img = Image.fromarray(img)
             pil_img.save(f"{location}/{f_name}.png")
 
+    def _gt_labels(self):
+        has_pickaxe = (self._agent_location == self._pickaxe_location).all()
+        has_gem = (self._agent_location == self._gem_location).all()
+        has_exit = (self._agent_location == self._exit_location).all()
+        has_lava = (self._agent_location == self._lava_location).all()
+
+        return np.array([has_pickaxe, has_gem, has_exit, has_lava])
+
     def reset(self, seed=None, options=None):
         '''
         TUTTO IL RESET
@@ -236,6 +244,7 @@ class GridWorldEnv(gym.Env):
         label_info = self._get_label_info()
         info = {"rew_dict": info}
         info.update(label_info)
+        info["gt_labels"] = self._gt_labels()
 
         return observation, info
 
@@ -316,6 +325,7 @@ class GridWorldEnv(gym.Env):
         info = {"rew_dict": info}
         label_info = self._get_label_info()
         info.update(label_info)
+        info["gt_labels"] = self._gt_labels()
 
         return observation, reward, terminated, truncated, info  # , sym
 

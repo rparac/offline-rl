@@ -18,6 +18,13 @@ class RMWrapper(gymnasium.vector.VectorWrapper):
         _rm = rm if rm is not None else RewardMachine.default_rm()
 
         self.rm_transitioner = DeterministicRMTransitioner(_rm, num_envs=env.num_envs)
+        # TODO: Remove later. For debugging only.
+        self._prev_gt_state_indices = None
+        self._prev_rm_state_indices = None
+        # Track which environments terminated in the previous step
+        # (needed because vectorized envs auto-reset terminated environments)
+        self._prev_terminated = np.zeros(env.num_envs, dtype=bool)
+        self._prev_truncated = np.zeros(env.num_envs, dtype=bool)
 
         num_states = len(self.rm_transitioner.rm.states)
         self.single_observation_space = gymnasium.spaces.Dict({
@@ -40,6 +47,11 @@ class RMWrapper(gymnasium.vector.VectorWrapper):
         
         # Convert RM state from one-hot to discrete indices
         rm_state_indices = np.argmax(rm_state, axis=1)
+
+        self._prev_gt_state_indices = None
+        self._prev_rm_state_indices = None
+        self._prev_terminated = np.zeros(self.num_envs, dtype=bool)
+        self._prev_truncated = np.zeros(self.num_envs, dtype=bool)
         
         # Return Dict observation
         new_obs = {
@@ -53,17 +65,25 @@ class RMWrapper(gymnasium.vector.VectorWrapper):
     ) -> tuple[WrapperObsType, SupportsFloat, bool, bool, dict[str, Any]]:
         obs, env_reward, terminated, truncated, info = self.env.step(action)
 
-        rm_state = self.rm_transitioner.get_next_state(self._curr_rm_state, info["labels"])
+        info["original_reward"] = env_reward
         
-        # TODO: clean this up. Possibly have a reward be returned by get_next_state.
-        # Compute RM-based rewards
-        rm_rewards = np.array([
-            self.rm_transitioner.rm.get_reward(
-                self.rm_transitioner.rm.states[np.argmax(self._curr_rm_state[i])],
-                self.rm_transitioner.rm.states[np.argmax(rm_state[i])]
-            )
-            for i in range(self.num_envs)
-        ], dtype=np.float32)
+        # In vectorized environments, when an episode terminates, the next step() automatically
+        # resets that environment. The observation returned is from the reset state.
+        # We need to reset RM state to initial for environments that terminated/truncated in the PREVIOUS step.
+        # Check which environments were done in the previous step (these are now reset)
+        prev_done_mask = self._prev_terminated | self._prev_truncated
+        single_initial_rm_state = self.rm_transitioner.get_initial_state()[0]
+        prev_rm_state = self._curr_rm_state
+        prev_rm_state[prev_done_mask] = single_initial_rm_state
+
+        # Compute next RM state from current state and labels
+        rm_state = self.rm_transitioner.get_next_state(prev_rm_state, info["labels"])
+        
+        # Update tracking for next step
+        self._prev_terminated = terminated.copy()
+        self._prev_truncated = truncated.copy()
+        
+        rm_rewards = self.rm_transitioner.rm.get_reward(prev_rm_state, rm_state)
         
         self._curr_rm_state = rm_state
         

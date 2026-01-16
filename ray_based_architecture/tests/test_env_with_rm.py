@@ -14,6 +14,13 @@ from ray_based_architecture.env.clip_obs_and_labels_wrapper import BatchCLIPObsA
 from ray_based_architecture.env.rm_wrapper import RMWrapper
 from ray_based_architecture.reward_machine.reward_machine import RewardMachine
 from ray_based_architecture.shared_memory.sac_replay_buffer import SACReplayBuffer
+from offline_rl.vlm.visual_minecraft_success_detector import (
+    VISUAL_MINECRAFT_LABEL_ORDER,
+    LABEL_GREY_YELLOW_PICKAXE,
+    LABEL_BLUE_DIAMOND_GEM,
+    LABEL_OPEN_RED_DOUBLE_DOOR,
+    LABEL_ORANGE_YELLOW_MAGMA,
+)
 
 import pygame
 
@@ -58,18 +65,17 @@ def create_test_env_with_rm(render_mode='human'):
     
     # Add transitions based on CLIP labels
     # Label order from visual_minecraft_success_detector:
-    # 0: "Grey and yellow pickaxe"
-    # 1: "Blue diamond gem"
-    # 2: "Open red double door"
-    # 3: "Orange and yellow magma texture"
+    # 0: LABEL_GREY_YELLOW_PICKAXE
+    # 1: LABEL_BLUE_DIAMOND_GEM
+    # 2: LABEL_OPEN_RED_DOUBLE_DOOR
+    # 3: LABEL_ORANGE_YELLOW_MAGMA
     # u0 --[Grey and yellow pickaxe]--> u1
-    # u1 --[Blue diamond gem]--> uacc
-    rm.add_transition("u0", "u1", ("Grey and yellow pickaxe",))
-    rm.add_transition("u1", "uacc", ("Orange and yellow magma texture",))
+    # u1 --[Orange and yellow magma texture]--> uacc
+    rm.add_transition("u0", "u1", (LABEL_GREY_YELLOW_PICKAXE,))
+    rm.add_transition("u1", "uacc", (LABEL_ORANGE_YELLOW_MAGMA,))
     
     # Build transition matrix with label order matching visual_minecraft_success_detector
-    label_order = ["Grey and yellow pickaxe", "Blue diamond gem", "Open red double door", "Orange and yellow magma texture"]
-    rm.build_transition_matrix(label_order)
+    rm.build_transition_matrix(VISUAL_MINECRAFT_LABEL_ORDER)
     
     print(f"\n✓ Reward Machine initialized with {len(rm.states)} states:")
     print(rm)
@@ -160,8 +166,8 @@ def test_env_with_rm(num_episodes=3):
     print(f"  Action space: {env.action_space}")
     print(f"  Actions: 0=Down, 1=Right, 2=Up, 3=Left")
     
-    # Label names for display
-    label_names = ["Grey and yellow pickaxe", "Blue diamond gem", "Open red double door", "Orange and yellow magma texture"]
+    # Label names for display (use the constant)
+    label_names = VISUAL_MINECRAFT_LABEL_ORDER
     
     # Initialize pygame for keyboard input
     pygame.init()
