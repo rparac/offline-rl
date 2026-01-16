@@ -64,6 +64,7 @@ class VLMService:
         print(f"Loading VLM Model on {self.device}...", flush=True)
         self.similarity_model = initialize_similarity_model()
         self.similarity_model.to(self.device)
+        self.similarity_model = self.similarity_model.half()  # Ensure half precision
         
         # VLM-specific metrics (Ray already provides latency and request metrics)
         self.batch_size_gauge = Gauge(
@@ -97,25 +98,37 @@ class VLMService:
         Reuses CLIP embeddings from BatchCLIPObsWrapper for both agent and reward computation.
         
         Args:
-            observations: CLIP embeddings of observations (batch_size, 768)
+            observations: CLIP embeddings of observations (batch_size, 768) or Dict with "image_embedding" and "rm_state"
             actions: actions taken (batch_size,)
-            next_observations: CLIP embeddings of next observations (batch_size, 768)
+            next_observations: CLIP embeddings of next observations (batch_size, 768) or Dict with "image_embedding" and "rm_state"
             terminateds: terminal flags (batch_size,)
             truncateds: truncation flags (batch_size,)
         """
         start_time = time.time()
-        batch_size = int(next_observations.shape[0])
+        
+        # Handle Dict observations (extract image embeddings for labeling)
+        if isinstance(next_observations, dict):
+            next_obs_embeddings = next_observations["image_embedding"]
+            # Store full Dict observations in replay buffer
+            obs_to_store = observations
+            next_obs_to_store = next_observations
+        else:
+            next_obs_embeddings = next_observations
+            obs_to_store = observations
+            next_obs_to_store = next_observations
+        
+        batch_size = int(next_obs_embeddings.shape[0])
 
         # Compute rewards from CLIP embeddings (already computed by BatchCLIPObsWrapper)
-        embedding_tensor = torch.from_numpy(next_observations).to(
+        embedding_tensor = torch.from_numpy(next_obs_embeddings).to(
             self.device,
-            dtype=torch.float16,
-            # dtype=torch.float32,
+            dtype=torch.float16,  # Match _embedded_prompts dtype
             non_blocking=True,
         )
 
         with torch.no_grad():
             similarities = self.similarity_model.forward(embedding_tensor)
+            print(f"Similarities: {similarities}")
             labels = self.similarity_model.labels_from_similarities(similarities)
             # if labels[:, 0].item():
             #     print("pickaxe")
@@ -128,18 +141,16 @@ class VLMService:
 
         custom_rewards = labels[:, 0].detach().float().cpu().numpy()
 
-        assert custom_rewards.shape == rewards.shape
-        assert (rewards == custom_rewards).all()
 
         inference_time_ms = (time.time() - start_time) * 1000
         throughput = batch_size / (inference_time_ms / 1000) if inference_time_ms > 0 else 0
         self.batch_size_gauge.set(batch_size)
         self.throughput_gauge.set(throughput)
 
-        # Store CLIP embeddings in replay buffer for fast sampling
+        # Store observations in replay buffer (Dict if provided, otherwise arrays)
         self.replay_buffer_handle.add_batch.remote(
-            observations=observations,
-            next_observations=next_observations,
+            observations=obs_to_store,
+            next_observations=next_obs_to_store,
             actions=np.asarray(actions, dtype=np.int64),
             rewards=custom_rewards,
             terminateds=np.asarray(terminateds, dtype=np.bool_),

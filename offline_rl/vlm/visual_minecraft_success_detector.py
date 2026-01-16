@@ -37,7 +37,7 @@ prompts_with_thresholds = {
     "Grey and yellow pickaxe": (0.1402 + 0.1822) / 2,
     "Blue diamond gem": (0.1265 + 0.1462) / 2,
     "Open red double door": (0.1134 + 0.1455) / 2,
-    "Orange and yellow magma texture": (0.1550 + 0.1803) / 2,
+    "Orange and yellow magma texture": (0.1550 + 0.1628) / 2,
 }
 
 idx_to_vis_minecraft_prompt = {i: prompt for i, prompt in enumerate(prompts_with_thresholds.keys())}
