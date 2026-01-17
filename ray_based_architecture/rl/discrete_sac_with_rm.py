@@ -22,6 +22,8 @@ from ray_based_architecture.env.rm_wrapper import RMWrapper
 from ray_based_architecture.shared_memory.sac_replay_buffer import SACReplayBuffer
 from ray_based_architecture.reward_machine.reward_machine import RewardMachine
 from offline_rl.vlm.visual_minecraft_success_detector import (
+    LABEL_BLUE_DIAMOND_GEM,
+    LABEL_OPEN_RED_DOUBLE_DOOR,
     VISUAL_MINECRAFT_LABEL_ORDER,
     LABEL_GREY_YELLOW_PICKAXE,
     LABEL_ORANGE_YELLOW_MAGMA,
@@ -93,7 +95,9 @@ def make_env(env_id, seed, idx, capture_video, run_name):
     def thunk():
         items = ["pickaxe", "lava", "door", "gem", "empty"]
         # formula = "(F c0)", 5, "task0: visit({1})".format(*items)
-        formula = "F(c0 & F(c1))", 5, "task3: seq_visit({0}, {1})".format(*items)
+        # formula = "F(c0 & F(c1))", 5, "task3: seq_visit({0}, {1})".format(*items)
+        formula = "(F (c0 & F c2)) & (F (c3 & F c2))", 5, "pickaxe or gem then door"
+
         kwargs = {
             "formula": formula,
             "render_mode": "rgb_array",
@@ -249,14 +253,20 @@ def train(args: Args):
     # Create reward machine with 3 states:
     # u0 (initial) -> u1 (got pickaxe) -> uacc (got gem)
     rm = RewardMachine()
-    rm.add_states(["u0", "u1", "uacc"])
+    rm.add_states(["u0", "u1", "u2", "u3", "uacc"])
     rm.set_u0("u0")
     rm.set_uacc("uacc")
     
     # u0 --[Grey and yellow pickaxe]--> u1
     # u1 --[Orange and yellow magma texture]--> uacc
     rm.add_transition("u0", "u1", (LABEL_GREY_YELLOW_PICKAXE,))
-    rm.add_transition("u1", "uacc", (LABEL_ORANGE_YELLOW_MAGMA,))
+    rm.add_transition("u0", "u2", (LABEL_BLUE_DIAMOND_GEM,))
+    rm.add_transition("u1", "u3", (LABEL_BLUE_DIAMOND_GEM,))
+    rm.add_transition("u2", "u3", (LABEL_GREY_YELLOW_PICKAXE,))
+    rm.add_transition("u3", "uacc", (LABEL_OPEN_RED_DOUBLE_DOOR,))
+    
+    # Build transition matrix with label order matching visual_minecraft_success_detector
+    rm.build_transition_matrix(VISUAL_MINECRAFT_LABEL_ORDER)
     
     # Build transition matrix with label order matching visual_minecraft_success_detector
     rm.build_transition_matrix(VISUAL_MINECRAFT_LABEL_ORDER)

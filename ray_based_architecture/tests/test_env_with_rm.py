@@ -36,7 +36,8 @@ def create_test_env_with_rm(render_mode='human'):
     # Environment configuration
     items = ["pickaxe", "lava", "door", "gem", "empty"]
     # formula = "(F c0)", 5, "task0: visit({1})".format(*items)
-    formula = "F(c0 & F(c1))", 5, "task3: seq_visit({0}, {1})".format(*items)
+    formula = "(F (c0 & F c2)) & (F (c3 & F c2))", 5, "pickaxe or gem then door"
+    # formula = "(F c3)", 5, "pickaxe or gem then door"
     kwargs = {
         "formula": formula,
         "render_mode": render_mode,
@@ -59,7 +60,7 @@ def create_test_env_with_rm(render_mode='human'):
     # Create Reward Machine (same as in discrete_sac_with_rm.py)
     # u0 (initial) -> u1 (got pickaxe) -> uacc (got gem)
     rm = RewardMachine()
-    rm.add_states(["u0", "u1", "uacc"])
+    rm.add_states(["u0", "u1", "u2", "u3", "uacc"])
     rm.set_u0("u0")
     rm.set_uacc("uacc")
     
@@ -72,7 +73,10 @@ def create_test_env_with_rm(render_mode='human'):
     # u0 --[Grey and yellow pickaxe]--> u1
     # u1 --[Orange and yellow magma texture]--> uacc
     rm.add_transition("u0", "u1", (LABEL_GREY_YELLOW_PICKAXE,))
-    rm.add_transition("u1", "uacc", (LABEL_ORANGE_YELLOW_MAGMA,))
+    rm.add_transition("u0", "u2", (LABEL_BLUE_DIAMOND_GEM,))
+    rm.add_transition("u1", "u3", (LABEL_BLUE_DIAMOND_GEM,))
+    rm.add_transition("u2", "u3", (LABEL_GREY_YELLOW_PICKAXE,))
+    rm.add_transition("u3", "uacc", (LABEL_OPEN_RED_DOUBLE_DOOR,))
     
     # Build transition matrix with label order matching visual_minecraft_success_detector
     rm.build_transition_matrix(VISUAL_MINECRAFT_LABEL_ORDER)
