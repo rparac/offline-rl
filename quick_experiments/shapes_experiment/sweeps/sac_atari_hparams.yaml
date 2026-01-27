@@ -1,4 +1,4 @@
-program: offline_rl/clean_rl/sac_atari.py
+program: quick_experiments/shapes_experiment/train.py
 method: bayes
 metric:
   name: charts/episodic_return
@@ -7,7 +7,7 @@ metric:
 # Only the parameters below are tuned. Everything else is fixed via `command`.
 parameters:
   batch-size:
-    values: [256, 512, 1024]
+    values: [128, 256, 512]
   policy-lr:
     distribution: log_uniform_values
     min: 1e-5
@@ -36,12 +36,12 @@ command:
   - --track
   - --no-capture-video
   # Fix everything else here (edit as needed for your setup):
-  - --env-id=VisualMinecraft-v0
-  - --total-timesteps=50000
+  - --env-id=QuickShapes-v0
+  - --total-timesteps=100000
   - --buffer-size=10000
-  - --gamma=0.99
+  - --gamma=0.9
   - --tau=0.005
-  - --learning-starts=20000
+  - --learning-starts=1000
   - --autotune
   - --num-envs=8
   # Tuned knobs (W&B agent fills these in from `parameters:` above):
