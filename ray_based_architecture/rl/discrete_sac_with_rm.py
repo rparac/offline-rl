@@ -96,7 +96,8 @@ def make_env(env_id, seed, idx, capture_video, run_name):
         items = ["pickaxe", "lava", "door", "gem", "empty"]
         # formula = "(F c0)", 5, "task0: visit({1})".format(*items)
         # formula = "F(c0 & F(c1))", 5, "task3: seq_visit({0}, {1})".format(*items)
-        formula = "(F (c0 & F c2)) & (F (c3 & F c2))", 5, "pickaxe or gem then door"
+        # formula = "(F (c0 & F c2)) & (F (c3 & F c2))", 5, "pickaxe or gem then door"
+        formula = "F (c0 & F (c1 & F (c2 & F c3)))", 5, "all elements in sequence"
 
         kwargs = {
             "formula": formula,
